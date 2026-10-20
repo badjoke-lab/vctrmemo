@@ -11,13 +11,13 @@
   const uid = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2));
   const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stamp = () => Date.now();
-  const makeBlock = (type='text', text='') => ({id:uid(), type, text, targetId:'', checked:false});
+  const makeBlock = (type='text', text='') => ({id:uid(), type, text, targetId:'', viewMode:'table', viewLimit:0, checked:false});
   const defaults = () => ({
     schema:1,
     pages:[
       {id:'welcome',title:'はじめに',icon:'✦',updatedAt:1,deleted:false,blocks:[
         {id:'w1',type:'heading',text:'自分の情報は、自分の手元に。',checked:false},
-        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.6 では、複数のデータベースを作り、ページ内に埋め込めます。',checked:false},
+        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.7 では、別データベースとのリレーションと埋め込み表示設定を利用できます。',checked:false},
         {id:'w3',type:'subheading',text:'できること',checked:false},
         {id:'w4',type:'todo',text:'ページを新規作成・編集する',checked:false},
         {id:'w5',type:'todo',text:'タスクをテーブル・カンバンで管理する',checked:false},
@@ -270,8 +270,18 @@
         controls.append(picker);row.append(controls);
         const db=getDatabase(block.targetId);
         if(db){
+          const controlsView=document.createElement('div');controlsView.className='embed-view-settings';
+          const mode=fieldSelector(block.viewMode||'table',[['table','テーブル'],['board','カンバン']],value=>{
+            block.viewMode=value;touchPage(page);renderBlocks(editor,page);
+          });
+          mode.setAttribute('aria-label','埋め込み表示形式');
+          const limit=fieldSelector(String(block.viewLimit||0),[['0','すべて'],['5','5件'],['10','10件'],['20','20件']],value=>{
+            block.viewLimit=Number(value);touchPage(page);renderBlocks(editor,page);
+          });
+          limit.setAttribute('aria-label','埋め込み表示件数');
+          controlsView.append(mode,limit);controls.append(controlsView);
           const embed=document.createElement('div');
-          renderTasks(embed,db,true);
+          renderTasks(embed,db,true,block,page);
           row.append(embed);
         }else{
           const missing=document.createElement('p');missing.className='doc-hint';
@@ -319,7 +329,18 @@
     for(const [v,label] of options){const o=document.createElement('option');o.value=v;o.textContent=label;el.append(o);}
     el.value=options.some(([v])=>v===value)?value:options[0][0];el.addEventListener('change',()=>onChange(el.value));return el;
   }
-  function isCompatibleColumnValue(raw,type){
+  function chooseRelationDatabase(current=''){
+    const available=liveDatabases();
+    if(!available.length){toast('参照先のデータベースがありません。');return null;}
+    const choices=available.map((db,i)=>(i+1)+': '+db.title).join('\n');
+    const initial=String(Math.max(0,available.findIndex(db=>db.id===current))+1 || 1);
+    const result=prompt('参照先データベースの番号を入力してください\n'+choices,initial);
+    if(result===null)return null;
+    const n=Number(result);
+    return Number.isInteger(n)&&n>0&&n<=available.length?available[n-1].id:null;
+  }
+  function isCompatibleColumnValue(raw,type,targetDbId=''){
+    if(type==='relation')return raw==='' || (!!getDatabase(targetDbId)&&liveTasks(targetDbId).some(t=>t.id===raw));
     if(raw==='')return true;
     if(type==='text')return true;
     if(type==='number')return raw.trim()!=='' && Number.isFinite(Number(raw));
@@ -333,18 +354,24 @@
     const name=prompt('列の名前を編集（最大80文字）',col.name);
     if(name===null)return;
     if(!name.trim()){toast('列名は空にできません。');return;}
-    const type=prompt('列の種類: text / number / date / checkbox',col.type);
+    const type=prompt('列の種類: text / number / date / checkbox / relation',col.type);
     if(type===null)return;
-    if(!['text','number','date','checkbox'].includes(type)){toast('対応していない列の種類です。');return;}
-    const invalid=liveTasks(col.dbId||DEFAULT_DB).filter(t=>!isCompatibleColumnValue(customValue(t,col.id),type));
+    if(!['text','number','date','checkbox','relation'].includes(type)){toast('対応していない列の種類です。');return;}
+    const target=type==='relation'?chooseRelationDatabase(col.targetDbId||''):'';
+    if(type==='relation'&&!target){toast('参照先が選択されていません。');return;}
+    const changedTarget=(col.targetDbId||'')!==target || col.type!==type;
+    const invalid=changedTarget?liveTasks(col.dbId||DEFAULT_DB).filter(t=>!isCompatibleColumnValue(customValue(t,col.id),type,target)):[];
+
     if(invalid.length){toast('変更できません。既存の '+invalid.length+' 件の値が '+type+' 形式に合いません。');return;}
-    col.name=name.trim().slice(0,80);col.type=type;persist();render();toast('列設定を保存しました。');
+    col.name=name.trim().slice(0,80);col.type=type;col.targetDbId=target;persist();render();toast('列設定を保存しました。');
   }
   function addColumn(dbId=DEFAULT_DB){
     const name=prompt('追加する列の名前（最大80文字）');if(!name?.trim())return;
-    const type=prompt('列の種類: text / number / date / checkbox','text');
-    if(!['text','number','date','checkbox'].includes(type)){toast('対応する種類は text / number / date / checkbox です。');return;}
-    state.dbColumns.push({id:uid(),dbId,name:name.trim().slice(0,80),type,deleted:false});persist();render();
+    const type=prompt('列の種類: text / number / date / checkbox / relation','text');
+    if(!['text','number','date','checkbox','relation'].includes(type)){toast('対応していない列の種類です。');return;}
+    const targetDbId=type==='relation'?chooseRelationDatabase():'';
+    if(type==='relation'&&!targetDbId){toast('参照先が選択されていません。');return;}
+    state.dbColumns.push({id:uid(),dbId,name:name.trim().slice(0,80),type,targetDbId,deleted:false});persist();render();
   }
   function setCustom(t,col,value){
     if(!t.properties)t.properties={};
@@ -354,6 +381,19 @@
     const td=document.createElement('td');const raw=customValue(t,col.id);
     const input=document.createElement('input');input.setAttribute('aria-label',col.name);input.dataset.columnId=col.id;
     input.className=col.type==='checkbox'?'task-check':'task-input';
+    if(col.type==='relation'){
+      const select=document.createElement('select');select.className='task-select relation-select';
+      select.dataset.columnId=col.id;select.setAttribute('aria-label',col.name);
+      const blank=document.createElement('option');blank.value='';blank.textContent='未設定';select.append(blank);
+      for(const target of liveTasks(col.targetDbId)){
+        const opt=document.createElement('option');opt.value=target.id;opt.textContent=target.title;select.append(opt);
+      }
+      if(raw && !liveTasks(col.targetDbId).some(x=>x.id===raw)){
+        const gone=document.createElement('option');gone.value=raw;gone.textContent='参照先が存在しません ('+raw.slice(0,24)+')';select.append(gone);
+      }
+      select.value=raw;select.addEventListener('change',()=>setCustom(t,col,select.value));
+      td.append(select);return td;
+    }
     if(col.type==='checkbox'){input.type='checkbox';input.checked=raw==='true';input.addEventListener('change',()=>setCustom(t,col,input.checked?'true':'false'));}
     else{
       input.type=col.type;input.value=raw;
@@ -362,7 +402,7 @@
     }
     td.append(input);return td;
   }
-  function renderTasks(root,db,embedded=false){
+  function renderTasks(root,db,embedded=false,block=null,ownerPage=null){
     if(!db)return;
     if(embedded){
       root.className='embedded-database';
@@ -380,9 +420,13 @@
       actions.append(rename);
       root.append(actions);
     }
+    const displayMode=embedded?(block?.viewMode==='board'?'board':'table'):dbMode;
+    const countLimit=embedded?([5,10,20].includes(block?.viewLimit)?block.viewLimit:0):0;
     const tabs=document.createElement('div');tabs.className='db-tabs';
-    tabs.append(button('▦ テーブル','db-tab'+(dbMode==='table'?' active':''),()=>{dbMode='table';render();}));
-    tabs.append(button('▥ カンバン','db-tab'+(dbMode==='board'?' active':''),()=>{dbMode='board';render();}));
+    if(!embedded){
+      tabs.append(button('▦ テーブル','db-tab'+(displayMode==='table'?' active':''),()=>{dbMode='table';render();}));
+      tabs.append(button('▥ カンバン','db-tab'+(displayMode==='board'?' active':''),()=>{dbMode='board';render();}));
+    }
     tabs.append(button('＋ 列を追加','db-tab',()=>addColumn(db.id)));root.append(tabs);
     const toolbar=document.createElement('div');toolbar.className='db-toolbar';
     const filter=fieldSelector(filterField,fieldOptions(true,db.id),value=>{filterField=value;render();},embedded?null:'filter-field');
@@ -392,14 +436,14 @@
     const sort=fieldSelector(sortField,[['none','並び替えなし'],...fieldOptions(false,db.id)],value=>{sortField=value;render();},embedded?null:'sort-field');
     const order=fieldSelector(sortDirection,[['asc','昇順'],['desc','降順']],value=>{sortDirection=value;render();},embedded?null:'sort-direction');
     toolbar.append(filter,q,sort,order);root.append(toolbar);
-    if(dbMode==='table')renderTable(root,db.id);else renderBoard(root,db.id);
+    if(displayMode==='table')renderTable(root,db.id,countLimit);else renderBoard(root,db.id,countLimit);
     const bottom=document.createElement('div');bottom.className='add-row';
     bottom.append(button('＋ 新しいタスク','primary-button',()=>{
       state.tasks.push({id:uid(),dbId:db.id,title:'新しいタスク',status:'未着手',priority:'中',due:'',properties:{},updatedAt:stamp(),deleted:false});
       persist();render();
     }));root.append(bottom);
   }
-  function renderTable(root,dbId){
+  function renderTable(root,dbId,limit=0){
     const wrap=document.createElement('div');wrap.className='task-table-wrap';const table=document.createElement('table');table.className='task-table';
     const thead=document.createElement('thead'),hdr=document.createElement('tr');
     for(const title of ['名前','ステータス','優先度','期限']){const th=document.createElement('th');th.textContent=title;hdr.append(th);}
@@ -409,7 +453,7 @@
       hdr.append(th);
     }
     const end=document.createElement('th');hdr.append(end);thead.append(hdr);table.append(thead);
-    const tbody=document.createElement('tbody');visibleTasks(dbId).forEach(t=>{
+    const tbody=document.createElement('tbody');(limit?visibleTasks(dbId).slice(0,limit):visibleTasks(dbId)).forEach(t=>{
       const tr=document.createElement('tr');
       const cell1=document.createElement('td');const name=document.createElement('input');name.className='task-input';name.value=t.title;name.setAttribute('aria-label','タスク名');name.addEventListener('input',()=>{t.title=name.value.slice(0,400);touchTask(t);});cell1.append(name,button('↗','record-open',()=>setView('task:'+t.id),'詳細ページを開く'));
       const cell2=document.createElement('td');cell2.append(taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);}));
@@ -420,14 +464,17 @@
       const cell5=document.createElement('td');cell5.append(button('×','row-delete',()=>{if(!confirm('このタスクを削除しますか？'))return;t.deleted=true;touchTask(t);render();},'削除'));
       tr.append(cell5);tbody.append(tr);
     });table.append(tbody);wrap.append(table);root.append(wrap);
-    const count=document.createElement('p');count.className='result-count';count.textContent=visibleTasks(dbId).length+' / '+liveTasks(dbId).length+' 件を表示';root.append(count);
+    const count=document.createElement('p');count.className='result-count';count.textContent=(limit?Math.min(limit,visibleTasks(dbId).length):visibleTasks(dbId).length)+' / '+liveTasks(dbId).length+' 件を表示';root.append(count);
   }
-  function renderBoard(root,dbId){
+  function renderBoard(root,dbId,limit=0){
     const board=document.createElement('div');board.className='board';
     STATUS.forEach(status=>{
-      const lane=document.createElement('div');lane.className='board-lane';const items=visibleTasks(dbId).filter(t=>t.status===status);
+      const lane=document.createElement('div');lane.className='board-lane';const items=(limit?visibleTasks(dbId).slice(0,limit):visibleTasks(dbId)).filter(t=>t.status===status);
       const head=document.createElement('div');head.className='lane-header';head.innerHTML=`<span>${escapeHtml(status)}</span><small>${items.length}</small>`;lane.append(head);
-      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns(dbId).map(c=>' · '+c.name+': '+customValue(t,c.id)).join('');card.append(title,button('詳細を開く ↗','record-open',()=>setView('task:'+t.id)),meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
+      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns(dbId).map(c=>{
+          const raw=customValue(t,c.id),related=c.type==='relation'?getTask(raw):null;
+          return ' · '+c.name+': '+(related?related.title:raw);
+        }).join('');card.append(title,button('詳細を開く ↗','record-open',()=>setView('task:'+t.id)),meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
       if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='タスクなし';lane.append(empty);}board.append(lane);
     });root.append(board);
   }
@@ -487,7 +534,18 @@
   function download(filename,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'application/json'}));a.download=filename;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);}
   function exportData(){download('vctrmemo-backup-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({...state,sync:engine.export(),exportedAt:new Date().toISOString()},null,2));toast('変更履歴を含むJSONバックアップを書き出しました。');}
   function mergeRecords(local,remote){const m=new Map(local.map(x=>[x.id,x]));for(const x of remote){if(!x||typeof x.id!=='string')continue;const prev=m.get(x.id);if(!prev||Number(x.updatedAt)>Number(prev.updatedAt))m.set(x.id,structuredClone(x));}return [...m.values()];}
-  function mergeState(received){if(!validate(received))return false;state.pages=mergeRecords(state.pages,received.pages);state.tasks=mergeRecords(state.tasks,received.tasks);state.dbColumns=mergeRecords(state.dbColumns||[],received.dbColumns||[]);state.databases=mergeRecords(state.databases||[],received.databases||[]);persist();render();return true;}
+  function mergeState(received){
+    if(!validate(received))return false;
+    const staged=structuredClone(state);
+    staged.pages=mergeRecords(staged.pages,received.pages);
+    staged.tasks=mergeRecords(staged.tasks,received.tasks);
+    staged.dbColumns=mergeRecords(staged.dbColumns||[],received.dbColumns||[]);
+    staged.databases=mergeRecords(staged.databases||[],received.databases||[]);
+    const trial=new VctrSync.Engine(engine.export().ops,engine.actor,engine.counter);
+    trial.capture(staged,state);
+    engine=trial;state=trial.project();baseline=structuredClone(state);
+    persist(true);render();return true;
+  }
   $('new-page').addEventListener('click',createPage);
   $('search-toggle').addEventListener('click',openSearch);
   $('search-close').addEventListener('click',closeSearch);
@@ -502,9 +560,25 @@
       if(file.size>8*1024*1024)throw new Error('ファイルサイズが大きすぎます');
       const parsed=JSON.parse(await file.text());
       if(!validate(parsed))throw new Error('バックアップ形式が不正です');
-      if(!confirm('JSONバックアップを取り込みます。競合が発生した場合は内容を確認できます。よろしいですか？'))return;
-      if(parsed.sync?.version===2&&Array.isArray(parsed.sync.ops)){
-        engine.merge(parsed.sync.ops);state=engine.project();baseline=structuredClone(state);persist(true);render();
+      const imported=parsed.sync?.version===2 ? parsed.sync.ops : null;
+      if(parsed.sync && (!Array.isArray(imported)||imported.length>12000 || !imported.every(VctrSync.isValidOp))){
+        throw new Error('同期履歴に不正な変更があります。取込を中止しました。');
+      }
+      if(imported){
+        const seen=new Map();
+        for(const op of imported){
+          if(seen.has(op.id)&&JSON.stringify(seen.get(op.id))!==JSON.stringify(op))throw new Error('同じIDに異なる変更が含まれます');
+          seen.set(op.id,op);
+        }
+      }
+      const summary='ページ '+parsed.pages.filter(p=>!p.deleted).length+'件・レコード '+parsed.tasks.filter(t=>!t.deleted).length+'件・履歴 '+(imported?.length??'なし')+'件';
+      if(!confirm('バックアップ取込: '+summary+'。\n現在のデータと統合します。競合があれば内容を確認してください。よろしいですか？'))return;
+      if(imported){
+        const trial=new VctrSync.Engine(engine.export().ops,engine.actor,engine.counter);
+        const existing=new Map(trial.export().ops.map(op=>[op.id,JSON.stringify(op)]));
+        for(const op of imported)if(existing.has(op.id)&&existing.get(op.id)!==JSON.stringify(op))throw new Error('既存履歴とIDが衝突しています');
+        trial.merge(imported);
+        engine=trial;state=engine.project();baseline=structuredClone(state);persist(true);render();
       }else mergeState(parsed);
       toast('バックアップを取り込みました。');
     }

@@ -8,9 +8,9 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const PAGE_FIELDS = ['title','icon','parentId','taskId','deleted','_pos'];
-  const BLOCK_FIELDS = ['type','text','targetId','checked','deleted','_pos'];
+  const BLOCK_FIELDS = ['type','text','targetId','viewMode','viewLimit','checked','deleted','_pos'];
   const TASK_FIELDS = ['title','status','priority','due','dbId','deleted','_pos'];
-  const COLUMN_FIELDS = ['name','type','dbId','deleted','_pos'];
+  const COLUMN_FIELDS = ['name','type','dbId','targetDbId','deleted','_pos'];
   const DATABASE_FIELDS = ['title','icon','deleted','_pos'];
   const DEFAULT_DATABASE_ID = 'db_default';
   const CELL_FIELDS = ['value'];
@@ -45,7 +45,10 @@
     if(!state.databases.some(d=>d.id===DEFAULT_DATABASE_ID))state.databases.unshift({id:DEFAULT_DATABASE_ID,title:'データベース',icon:'▦',deleted:false});
     fillInsertedPositions(state.databases);
     fillInsertedPositions(state.dbColumns);
-    for(const c of state.dbColumns)if(typeof c.dbId!=='string'||!c.dbId)c.dbId=DEFAULT_DATABASE_ID;
+    for(const c of state.dbColumns){
+      if(typeof c.dbId!=='string'||!c.dbId)c.dbId=DEFAULT_DATABASE_ID;
+      if(typeof c.targetDbId!=='string')c.targetDbId='';
+    }
     for(const t of state.tasks){
       if(!t.properties || typeof t.properties!=='object' || Array.isArray(t.properties))t.properties={};
       if(typeof t.dbId!=='string'||!t.dbId)t.dbId=DEFAULT_DATABASE_ID;
@@ -53,7 +56,11 @@
     for(const p of state.pages){
       if(typeof p.taskId!=='string')p.taskId='';
       if(!Array.isArray(p.blocks))p.blocks=[];
-      for(const b of p.blocks)if(typeof b.targetId!=='string')b.targetId='';
+      for(const b of p.blocks){
+        if(typeof b.targetId!=='string')b.targetId='';
+        if(typeof b.viewMode!=='string'||!['table','board'].includes(b.viewMode))b.viewMode='table';
+        if(![0,5,10,20].includes(b.viewLimit))b.viewLimit=0;
+      }
       fillInsertedPositions(p.blocks);
     }
   }
@@ -97,14 +104,16 @@
     const parts=parseKey(op.key),field=parts.at(-1),v=op.value;
     if(field==='deleted'||field==='checked')return typeof v==='boolean';
     if(field==='_pos')return typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)<1e12;
+    if(field==='viewLimit')return parts[0]==='B'&&[0,5,10,20].includes(v);
     if(typeof v!=='string')return false;
     if(field==='text')return v.length<=30000;
     if(field==='name')return v.length>0&&v.length<=80;
-    if(field==='parentId'||field==='taskId'||field==='targetId'||field==='dbId')return v.length<=128;
+    if(field==='parentId'||field==='taskId'||field==='targetId'||field==='dbId'||field==='targetDbId')return v.length<=128;
+    if(field==='viewMode')return parts[0]==='B'&&['table','board'].includes(v);
     if(field==='value')return v.length<=500;
     if(field==='title')return v.length<=400;
     if(field==='icon')return v.length<=15;
-    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox']:['text','heading','subheading','todo','quote','code','link','database']).includes(v);
+    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox','relation']:['text','heading','subheading','todo','quote','code','link','database']).includes(v);
     if(field==='status')return ['未着手','進行中','完了'].includes(v);
     if(field==='priority')return ['低','中','高'].includes(v);
     if(field==='due')return v===''||/^\d{4}-\d\d-\d\d$/.test(v);
@@ -208,13 +217,13 @@
           if(!databases.has(p[1]))databases.set(p[1],{id:p[1],title:'データベース',icon:'▦',deleted:false,_pos:0});
           databases.get(p[1])[p[2]]=v;
         }else if(p[0]==='C'){
-          if(!columns.has(p[1]))columns.set(p[1],{id:p[1],name:'列',type:'text',deleted:false,_pos:0});
+          if(!columns.has(p[1]))columns.set(p[1],{id:p[1],name:'列',type:'text',dbId:DEFAULT_DATABASE_ID,targetDbId:'',deleted:false,_pos:0});
           columns.get(p[1])[p[2]]=v;
         }else if(p[0]==='V'){
           cells.push({taskId:p[1],columnId:p[2],value:v});
         }else{
           const k2=p[1]+'\u0000'+p[2];
-          if(!blocks.has(k2))blocks.set(k2,{pageId:p[1],id:p[2],text:'',targetId:'',type:'text',checked:false,deleted:false,_pos:0});
+          if(!blocks.has(k2))blocks.set(k2,{pageId:p[1],id:p[2],text:'',targetId:'',viewMode:'table',viewLimit:0,type:'text',checked:false,deleted:false,_pos:0});
           blocks.get(k2)[p[3]]=v;
         }
       }

@@ -54,3 +54,10 @@
 .embedded-database .task-table th,.embedded-database .task-table td{padding:9px 10px}
 .db-title-actions{display:flex;gap:8px;margin:12px 0}
 @media(max-width:680px){.database-block-row .embedded-database{margin-left:0;flex-basis:100%;padding:9px}}
+
+/* v0.7 — relation fields and embedded view controls */
+.relation-select{min-width:150px;max-width:260px}
+.embed-view-settings{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.embed-view-settings .task-select{min-width:105px}
+.database-embed-controls{padding-bottom:10px}
+@media(max-width:680px){.relation-select{min-width:120px;max-width:170px}}
