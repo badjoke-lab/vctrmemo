@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "dist"
 SITE = OUT / "site"
 APP_FILES = ("index.html", "styles.css", "sync-core.js", "transfer.js", "app.js", "manifest.toml")
-VERSION = "0.3"
+VERSION = "0.4"
 
 
 def build():
