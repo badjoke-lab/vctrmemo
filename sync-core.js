@@ -7,9 +7,11 @@
   root.VctrSync = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
-  const PAGE_FIELDS = ['title','icon','deleted','_pos'];
+  const PAGE_FIELDS = ['title','icon','parentId','deleted','_pos'];
   const BLOCK_FIELDS = ['type','text','checked','deleted','_pos'];
   const TASK_FIELDS = ['title','status','priority','due','deleted','_pos'];
+  const COLUMN_FIELDS = ['name','type','deleted','_pos'];
+  const CELL_FIELDS = ['value'];
   const MAX_OPS = 12000;
   const encode = JSON.stringify;
   const uid = () => globalThis.crypto?.randomUUID?.() || 'a'+Date.now().toString(36)+Math.random().toString(36).slice(2);
@@ -36,6 +38,9 @@
     if(!state || !Array.isArray(state.pages) || !Array.isArray(state.tasks))throw Error('データ形式が不正です');
     fillInsertedPositions(state.pages);
     fillInsertedPositions(state.tasks);
+    if(!Array.isArray(state.dbColumns))state.dbColumns=[];
+    fillInsertedPositions(state.dbColumns);
+    for(const t of state.tasks)if(!t.properties || typeof t.properties!=='object' || Array.isArray(t.properties))t.properties={};
     for(const p of state.pages){if(!Array.isArray(p.blocks))p.blocks=[];fillInsertedPositions(p.blocks);}
   }
   function flatten(state){
@@ -50,15 +55,21 @@
     }
     for(const t of state.tasks)if(typeof t.id==='string'){
       for(const f of TASK_FIELDS)fields.set(key('T',t.id,f),t[f]??(f==='deleted'?false:''));
+      for(const [colId,value] of Object.entries(t.properties||{})){
+        if(typeof colId==='string' && colId.length<=128)fields.set(key('V',t.id,colId,'value'),String(value??''));
+      }
+    }
+    for(const c of state.dbColumns)if(typeof c.id==='string'){
+      for(const f of COLUMN_FIELDS)fields.set(key('C',c.id,f),c[f]??(f==='deleted'?false:''));
     }
     return fields;
   }
   function parseKey(k){
     try{
       const p=JSON.parse(k);
-      if(!Array.isArray(p)||!['P','B','T'].includes(p[0]))return null;
-      const fields=p[0]==='P'?PAGE_FIELDS:p[0]==='B'?BLOCK_FIELDS:TASK_FIELDS;
-      if(p.length !== (p[0]==='B'?4:3))return null;
+      if(!Array.isArray(p)||!['P','B','T','C','V'].includes(p[0]))return null;
+      const fields=({P:PAGE_FIELDS,B:BLOCK_FIELDS,T:TASK_FIELDS,C:COLUMN_FIELDS,V:CELL_FIELDS})[p[0]];
+      if(p.length !== (['B','V'].includes(p[0])?4:3))return null;
       if(!p.slice(1,-1).every(v=>typeof v==='string' && v.length>0 && v.length<=128))return null;
       if(!fields.includes(p.at(-1)))return null;
       return p;
@@ -73,9 +84,12 @@
     if(field==='_pos')return typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)<1e12;
     if(typeof v!=='string')return false;
     if(field==='text')return v.length<=30000;
+    if(field==='name')return v.length>0&&v.length<=80;
+    if(field==='parentId')return v.length<=128;
+    if(field==='value')return v.length<=500;
     if(field==='title')return v.length<=400;
     if(field==='icon')return v.length<=15;
-    if(field==='type')return ['text','heading','subheading','todo','quote','code'].includes(v);
+    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox']:['text','heading','subheading','todo','quote','code']).includes(v);
     if(field==='status')return ['未着手','進行中','完了'].includes(v);
     if(field==='priority')return ['低','中','高'].includes(v);
     if(field==='due')return v===''||/^\d{4}-\d\d-\d\d$/.test(v);
@@ -140,6 +154,7 @@
       for(const [k] of previous){
         if(next.has(k))continue;
         const parts=parseKey(k);if(!parts)continue;
+        if(parts[0]==='V'){this.change(k,'');continue;}
         if(parts.at(-1)!=='deleted'){
           const tombstone=key(...parts.slice(0,-1),'deleted');
           if(!next.has(tombstone))this.change(tombstone,true);
@@ -165,20 +180,28 @@
       return true;
     }
     project(){
-      const pages=new Map(),tasks=new Map(),blocks=new Map();
+      const pages=new Map(),tasks=new Map(),blocks=new Map(),columns=new Map(),cells=[];
       for(const [k,v] of this.values){
         const p=parseKey(k);if(!p)continue;
         if(p[0]==='P'){
-          if(!pages.has(p[1]))pages.set(p[1],{id:p[1],title:'無題',icon:'◈',deleted:false,blocks:[],_pos:0,updatedAt:1});
+          if(!pages.has(p[1]))pages.set(p[1],{id:p[1],title:'無題',icon:'◈',parentId:'',deleted:false,blocks:[],_pos:0,updatedAt:1});
           pages.get(p[1])[p[2]]=v;
         }else if(p[0]==='T'){
-          if(!tasks.has(p[1]))tasks.set(p[1],{id:p[1],title:'無題',status:'未着手',priority:'中',due:'',deleted:false,_pos:0,updatedAt:1});
+          if(!tasks.has(p[1]))tasks.set(p[1],{id:p[1],title:'無題',status:'未着手',priority:'中',due:'',deleted:false,properties:{},_pos:0,updatedAt:1});
           tasks.get(p[1])[p[2]]=v;
+        }else if(p[0]==='C'){
+          if(!columns.has(p[1]))columns.set(p[1],{id:p[1],name:'列',type:'text',deleted:false,_pos:0});
+          columns.get(p[1])[p[2]]=v;
+        }else if(p[0]==='V'){
+          cells.push({taskId:p[1],columnId:p[2],value:v});
         }else{
           const k2=p[1]+'\u0000'+p[2];
           if(!blocks.has(k2))blocks.set(k2,{pageId:p[1],id:p[2],text:'',type:'text',checked:false,deleted:false,_pos:0});
           blocks.get(k2)[p[3]]=v;
         }
+      }
+      for(const {taskId,columnId,value} of cells){
+        if(tasks.has(taskId))tasks.get(taskId).properties[columnId]=value;
       }
       for(const b of blocks.values()){
         const page=pages.get(b.pageId);
@@ -186,7 +209,7 @@
       }
       const sort=(a,b)=>(a._pos||0)-(b._pos||0)||a.id.localeCompare(b.id);
       for(const p of pages.values())p.blocks.sort(sort);
-      return {schema:1,pages:[...pages.values()].sort(sort),tasks:[...tasks.values()].sort(sort)};
+      return {schema:1,pages:[...pages.values()].sort(sort),tasks:[...tasks.values()].sort(sort),dbColumns:[...columns.values()].sort(sort)};
     }
     export(){return {version:2,actor:this.actor,counter:this.counter,ops:[...this.ops.values()]};}
   }
