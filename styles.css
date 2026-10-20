@@ -13,3 +13,15 @@
 .conflict-choice{display:block;width:100%;text-align:left;white-space:normal;border:1px solid var(--border);background:#121719;border-radius:8px;padding:10px;margin:7px 0}
 .conflict-choice:hover{border-color:var(--teal)}
 .conflict-choice pre{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);margin:0;font-size:13px;font-family:inherit;max-height:160px;overflow:auto}
+
+/* v0.4 — nested pages and database controls */
+.tree-item { min-height: 37px; }
+.page-parent-path { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 10px; }
+.page-parent-path:empty { display:none; }
+.db-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0 16px; }
+.db-toolbar .task-input { flex:1; min-width:160px; max-width:340px; border:1px solid var(--border, #34443e); border-radius:6px; padding:8px; }
+.db-toolbar .task-select { min-height:36px; }
+.column-delete { border:0; background:transparent; cursor:pointer; color:#b8a19b; font-size:14px; padding:3px; }
+.task-check { width:18px; height:18px; cursor:pointer; }
+.result-count { font-size:12px; opacity:.75; margin-top:8px; }
+@media(max-width:680px){ .db-toolbar > * { flex:1; min-width:125px; } }
