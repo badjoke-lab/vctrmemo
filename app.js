@@ -17,7 +17,7 @@
     pages:[
       {id:'welcome',title:'はじめに',icon:'✦',updatedAt:1,deleted:false,blocks:[
         {id:'w1',type:'heading',text:'自分の情報は、自分の手元に。',checked:false},
-        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.3 では、端末内での編集と分割送信による手動共有を試せます。',checked:false},
+        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.4 では、階層ページと列のカスタマイズ、絞り込み・並び替えを試せます。',checked:false},
         {id:'w3',type:'subheading',text:'できること',checked:false},
         {id:'w4',type:'todo',text:'ページを新規作成・編集する',checked:false},
         {id:'w5',type:'todo',text:'タスクをテーブル・カンバンで管理する',checked:false},
@@ -30,6 +30,7 @@
         {id:'m1',type:'subheading',text:'議題',checked:false},
         {id:'m2',type:'todo',text:'目的と次のアクションを決める',checked:false}]}
     ],
+    dbColumns:[],
     tasks:[
       {id:'task-1',title:'ページとデータベースの設計',status:'完了',priority:'高',due:'',updatedAt:1,deleted:false},
       {id:'task-2',title:'WebXDCでの動作検証',status:'進行中',priority:'高',due:'',updatedAt:1,deleted:false},
@@ -55,10 +56,28 @@
   let incomingQueue = [];
   let view = 'home';
   let dbMode = 'table';
+  let filterField = 'all', filterQuery = '', sortField = 'none', sortDirection = 'asc';
   let pickerFor = null;
   let toastTimer;
   const livePages = () => state.pages.filter(p => !p.deleted);
   const liveTasks = () => state.tasks.filter(t => !t.deleted);
+  const liveColumns = () => (state.dbColumns||[]).filter(c=>!c.deleted);
+  const customValue = (t,id) => String(t.properties?.[id]??'');
+  const taskValue = (t,id) => id.startsWith('custom:')?customValue(t,id.slice(7)):String(t[id]??'');
+  function visibleTasks(){
+    let tasks=liveTasks();const q=filterQuery.trim().toLocaleLowerCase();
+    if(q)tasks=tasks.filter(t=>{
+      if(filterField==='all')return [t.title,t.status,t.priority,t.due,...liveColumns().map(c=>customValue(t,c.id))].some(v=>String(v).toLocaleLowerCase().includes(q));
+      return taskValue(t,filterField).toLocaleLowerCase().includes(q);
+    });
+    if(sortField!=='none')tasks=[...tasks].sort((a,b)=>{
+      const col=liveColumns().find(c=>sortField==='custom:'+c.id);
+      const va=taskValue(a,sortField),vb=taskValue(b,sortField);
+      const cmp=col?.type==='number'?((Number(va)||0)-(Number(vb)||0)):va.localeCompare(vb,'ja',{numeric:true});
+      return (sortDirection==='desc'?-1:1)*cmp;
+    });
+    return tasks;
+  }
   const getPage = id => state.pages.find(p=>p.id===id && !p.deleted);
   const getTask = id => state.tasks.find(t=>t.id===id && !t.deleted);
   function toast(message) { const node=$('toast');node.textContent=message;node.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('show'),3300); }
@@ -84,7 +103,7 @@
     engine.conflicts.forEach(c=>{
       const wrap=document.createElement('section');wrap.className='conflict-item';
       const heading=document.createElement('h3');
-      const kind=c.parts[0]==='B'?'ブロック':c.parts[0]==='P'?'ページ':'タスク';
+      const kind=({B:'ブロック',P:'ページ',T:'タスク',C:'追加列',V:'セル'})[c.parts[0]]||'項目';
       heading.textContent=kind+' '+c.parts.slice(1,-1).join(' / ')+' / '+c.parts.at(-1);
       const help=document.createElement('p');help.textContent='別々に変更された内容です。残す内容を選ぶと、他の候補は履歴に残ります。';
       wrap.append(heading,help);
@@ -120,12 +139,38 @@
   function touchTask(t) { t.updatedAt=stamp();persist(); }
   const button = (label, cls, onClick, title) => {const el=document.createElement('button');el.type='button';el.textContent=label;el.className=cls||'';if(title)el.title=title;el.addEventListener('click',onClick);return el;};
   function setView(next){ view=next; pickerFor=null;render();closeSidebar(); }
+  function pageTree(){
+    const pages=livePages(), ids=new Set(pages.map(p=>p.id)), byParent=new Map();
+    pages.forEach(p=>{const parent=p.parentId!==p.id&&ids.has(p.parentId)?p.parentId:'';
+      if(!byParent.has(parent))byParent.set(parent,[]);
+      byParent.get(parent).push(p);
+    });
+    const out=[],visited=new Set();
+    function walk(parent,depth){
+      for(const p of byParent.get(parent)||[]){
+        if(visited.has(p.id))continue;
+        visited.add(p.id);out.push({page:p,depth});walk(p.id,depth+1);
+      }
+    }
+    walk('',0);
+    // A remote update could create an invalid parent cycle: keep those pages visible.
+    pages.forEach(p=>{if(!visited.has(p.id)){visited.add(p.id);out.push({page:p,depth:0});}});
+    return out;
+  }
+  function descendants(id){
+    const found=new Set([id]);let changed=true;
+    while(changed){changed=false;livePages().forEach(p=>{if(!found.has(p.id)&&found.has(p.parentId)){found.add(p.id);changed=true;}});}
+    return found;
+  }
   function renderSidebar() {
     const nav=$('pages-list');nav.replaceChildren();
     nav.appendChild(navButton('home','⌂','Overview','概要'));
     nav.appendChild(navButton('tasks','▦','データベース',String(liveTasks().length)));
     const label=document.createElement('div');label.className='sidebar-section-label';label.style.paddingTop='16px';label.textContent='PAGES';nav.appendChild(label);
-    livePages().forEach(p=>nav.appendChild(navButton(p.id,p.icon,p.title,'')));
+    pageTree().forEach(({page,depth})=>{const item=navButton(page.id,page.icon,page.title,'');
+      item.classList.add('tree-item');item.style.paddingLeft=(12+Math.min(depth,8)*15)+'px';
+      item.dataset.depth=String(depth);nav.appendChild(item);
+    });
   }
   function navButton(id,icon,name,meta) {
     const b=button('','page-link'+(view===id?' active':''),()=>setView(id));
@@ -145,13 +190,27 @@
     const tasksHead=document.createElement('div');tasksHead.className='section-top';tasksHead.innerHTML='<h2>作業の状況</h2>';tasksHead.append(button('データベースを開く →','subtle-button',()=>setView('tasks')));root.append(tasksHead);
     const stat=document.createElement('div');stat.className='info-note';stat.textContent=`進行中 ${liveTasks().filter(t=>t.status==='進行中').length} 件 ／ 未着手 ${liveTasks().filter(t=>t.status==='未着手').length} 件。ページもタスクも端末内に保存されます。`;root.append(stat);
   }
-  function createPage(){const p={id:uid(),title:'無題',icon:ICONS[Math.floor(Math.random()*ICONS.length)],updatedAt:stamp(),deleted:false,blocks:[makeBlock('text','')]};state.pages.push(p);persist();setView(p.id);const input=$('doc-title');if(input){input.focus();input.select();}}
+  function createPage(parentId=''){if(typeof parentId!=='string')parentId='';const p={id:uid(),title:'無題',parentId:'',icon:ICONS[Math.floor(Math.random()*ICONS.length)],updatedAt:stamp(),deleted:false,blocks:[makeBlock('text','')]};p.parentId=typeof parentId==='string'?parentId:'';state.pages.push(p);persist();setView(p.id);const input=$('doc-title');if(input){input.focus();input.select();}}
   function renderDoc(root,page) {
     const header=document.createElement('div');header.className='eyebrow';header.textContent='PAGE / DOCUMENT';root.append(header);
+    const path=document.createElement('div');path.className='page-parent-path';
+    let parent=getPage(page.parentId),guard=new Set([page.id]);
+    const chain=[];
+    while(parent&&!guard.has(parent.id)){chain.unshift(parent);guard.add(parent.id);parent=getPage(parent.parentId);}
+    for(const entry of chain){path.append(button(entry.title+' /','subtle-button',()=>setView(entry.id)));}
+    root.append(path);
     const top=document.createElement('div');top.className='doc-header';
     const title=document.createElement('input');title.id='doc-title';title.className='doc-title';title.value=page.title;title.placeholder='ページのタイトル';title.setAttribute('aria-label','ページのタイトル');
     title.addEventListener('input',()=>{page.title=title.value.slice(0,200);touchPage(page);$('crumb-page').textContent=page.title||'無題';const link=[...$('pages-list').querySelectorAll('button')].find(b=>b.classList.contains('active'));if(link){link.querySelector('.page-name').textContent=page.title||'無題';}});
-    const actions=document.createElement('div');actions.className='doc-actions';actions.append(button('複製','subtle-button',()=>{const p={...structuredClone(page),id:uid(),title:page.title+' のコピー',updatedAt:stamp(),blocks:page.blocks.map(b=>({...b,id:uid()}))};state.pages.push(p);persist();setView(p.id);}));actions.append(button('削除','subtle-button danger',()=>{if(!confirm('このページを削除しますか？ JSONバックアップがない場合、復元できません。'))return;page.deleted=true;touchPage(page);setView('home');}));top.append(title,actions);root.append(top);
+    const actions=document.createElement('div');actions.className='doc-actions';actions.append(button('複製','subtle-button',()=>{const p={...structuredClone(page),id:uid(),title:page.title+' のコピー',updatedAt:stamp(),blocks:page.blocks.map(b=>({...b,id:uid()}))};state.pages.push(p);persist();setView(p.id);}));actions.append(button('＋ 子ページ','subtle-button',()=>createPage(page.id)));
+    const parentSelect=document.createElement('select');parentSelect.id='parent-select';parentSelect.className='task-select';
+    const opts=[{id:'',title:'最上位へ移動'},...livePages().filter(p=>!descendants(page.id).has(p.id))];
+    for(const opt of opts){const o=document.createElement('option');o.value=opt.id;o.textContent=opt.title;parentSelect.append(o);}
+    parentSelect.value=page.parentId||'';
+    parentSelect.setAttribute('aria-label','親ページ');
+    parentSelect.addEventListener('change',()=>{page.parentId=parentSelect.value;touchPage(page);render();});
+    actions.append(parentSelect);
+    actions.append(button('削除' ,'subtle-button danger',()=>{if(!confirm('このページを削除しますか？ JSONバックアップがない場合、復元できません。'))return;page.deleted=true;touchPage(page);setView('home');}));top.append(title,actions);root.append(top);
     const hint=document.createElement('p');hint.className='doc-hint';hint.textContent='入力は自動保存されます。Enterで新しいブロック、Shift+Enterで改行。';root.append(hint);
     const editor=document.createElement('div');editor.className='editor';editor.id='editor';root.append(editor);
     renderBlocks(editor,page);
@@ -192,32 +251,84 @@
     const s=document.createElement('select');s.className='task-select';
     options.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;s.append(o);});s.value=options.includes(value)?value:options[0];s.addEventListener('change',()=>onChange(s.value));return s;
   }
+  function fieldOptions(extraAll=false){
+    return [...(extraAll?[['all','全項目']]:[]),['title','名前'],['status','ステータス'],['priority','優先度'],['due','期限'],
+      ...liveColumns().map(c=>['custom:'+c.id,c.name])];
+  }
+  function fieldSelector(value,options,onChange,id){
+    const el=document.createElement('select');el.className='task-select';if(id)el.id=id;
+    for(const [v,label] of options){const o=document.createElement('option');o.value=v;o.textContent=label;el.append(o);}
+    el.value=options.some(([v])=>v===value)?value:options[0][0];el.addEventListener('change',()=>onChange(el.value));return el;
+  }
+  function addColumn(){
+    const name=prompt('追加する列の名前（最大80文字）');if(!name?.trim())return;
+    const type=prompt('列の種類: text / number / date / checkbox','text');
+    if(!['text','number','date','checkbox'].includes(type)){toast('対応する種類は text / number / date / checkbox です。');return;}
+    state.dbColumns.push({id:uid(),name:name.trim().slice(0,80),type,deleted:false});persist();render();
+  }
+  function setCustom(t,col,value){
+    if(!t.properties)t.properties={};
+    t.properties[col.id]=String(value).slice(0,500);touchTask(t);
+  }
+  function columnCell(t,col){
+    const td=document.createElement('td');const raw=customValue(t,col.id);
+    const input=document.createElement('input');input.setAttribute('aria-label',col.name);input.dataset.columnId=col.id;
+    input.className=col.type==='checkbox'?'task-check':'task-input';
+    if(col.type==='checkbox'){input.type='checkbox';input.checked=raw==='true';input.addEventListener('change',()=>setCustom(t,col,input.checked?'true':'false'));}
+    else{
+      input.type=col.type;input.value=raw;
+      const listener=col.type==='text'?'input':'change';
+      input.addEventListener(listener,()=>setCustom(t,col,input.value));
+    }
+    td.append(input);return td;
+  }
   function renderTasks(root){
-    root.innerHTML=intro('STRUCTURED THINKING','データベース','表形式とカンバン形式を切り替えて管理できます。ステータスや優先度を変更すると自動保存します。');
+    root.innerHTML=intro('STRUCTURED THINKING','データベース','自由に列を追加し、表・カンバン・フィルター・ソートで管理できます。');
     const tabs=document.createElement('div');tabs.className='db-tabs';
     tabs.append(button('▦ テーブル','db-tab'+(dbMode==='table'?' active':''),()=>{dbMode='table';render();}));
-    tabs.append(button('▥ カンバン','db-tab'+(dbMode==='board'?' active':''),()=>{dbMode='board';render();}));root.append(tabs);
+    tabs.append(button('▥ カンバン','db-tab'+(dbMode==='board'?' active':''),()=>{dbMode='board';render();}));
+    tabs.append(button('＋ 列を追加','db-tab',addColumn));root.append(tabs);
+    const toolbar=document.createElement('div');toolbar.className='db-toolbar';
+    const filter=fieldSelector(filterField,fieldOptions(true),value=>{filterField=value;render();},'filter-field');
+    const q=document.createElement('input');q.id='filter-query';q.className='task-input';q.placeholder='含まれる文字で絞り込み';q.value=filterQuery;
+    q.addEventListener('change',()=>{filterQuery=q.value.slice(0,200);render();});
+    q.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();q.blur();}});
+    const sort=fieldSelector(sortField,[['none','並び替えなし'],...fieldOptions()],value=>{sortField=value;render();},'sort-field');
+    const order=fieldSelector(sortDirection,[['asc','昇順'],['desc','降順']],value=>{sortDirection=value;render();},'sort-direction');
+    toolbar.append(filter,q,sort,order);root.append(toolbar);
     if(dbMode==='table')renderTable(root);else renderBoard(root);
-    const bottom=document.createElement('div');bottom.className='add-row';bottom.append(button('＋ 新しいタスク','primary-button',()=>{state.tasks.push({id:uid(),title:'新しいタスク',status:'未着手',priority:'中',due:'',updatedAt:stamp(),deleted:false});persist();render();}));root.append(bottom);
+    const bottom=document.createElement('div');bottom.className='add-row';
+    bottom.append(button('＋ 新しいタスク','primary-button',()=>{state.tasks.push({id:uid(),title:'新しいタスク',status:'未着手',priority:'中',due:'',properties:{},updatedAt:stamp(),deleted:false});persist();render();}));root.append(bottom);
   }
   function renderTable(root){
-    const wrap=document.createElement('div');wrap.className='task-table-wrap';const table=document.createElement('table');table.className='task-table';table.innerHTML='<thead><tr><th style="width:40%">名前</th><th>ステータス</th><th>優先度</th><th>期限</th><th></th></tr></thead>';
-    const tbody=document.createElement('tbody');liveTasks().forEach(t=>{
+    const wrap=document.createElement('div');wrap.className='task-table-wrap';const table=document.createElement('table');table.className='task-table';
+    const thead=document.createElement('thead'),hdr=document.createElement('tr');
+    for(const title of ['名前','ステータス','優先度','期限']){const th=document.createElement('th');th.textContent=title;hdr.append(th);}
+    for(const c of liveColumns()){
+      const th=document.createElement('th');const label=document.createElement('span');label.textContent=c.name+' ';
+      th.append(label,button('×','column-delete',()=>{if(!confirm('列「'+c.name+'」を非表示にしますか？ 値は履歴に残ります。'))return;c.deleted=true;persist();render();},'列を非表示'));
+      hdr.append(th);
+    }
+    const end=document.createElement('th');hdr.append(end);thead.append(hdr);table.append(thead);
+    const tbody=document.createElement('tbody');visibleTasks().forEach(t=>{
       const tr=document.createElement('tr');
       const cell1=document.createElement('td');const name=document.createElement('input');name.className='task-input';name.value=t.title;name.setAttribute('aria-label','タスク名');name.addEventListener('input',()=>{t.title=name.value.slice(0,400);touchTask(t);});cell1.append(name);
       const cell2=document.createElement('td');cell2.append(taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);}));
       const cell3=document.createElement('td');cell3.append(taskSelect(t.priority,PRIORITY,v=>{t.priority=v;touchTask(t);}));
       const cell4=document.createElement('td');const date=document.createElement('input');date.type='date';date.className='task-date';date.value=t.due||'';date.setAttribute('aria-label','期限');date.addEventListener('change',()=>{t.due=date.value;touchTask(t);});cell4.append(date);
+      tr.append(cell1,cell2,cell3,cell4);
+      for(const col of liveColumns())tr.append(columnCell(t,col));
       const cell5=document.createElement('td');cell5.append(button('×','row-delete',()=>{if(!confirm('このタスクを削除しますか？'))return;t.deleted=true;touchTask(t);render();},'削除'));
-      tr.append(cell1,cell2,cell3,cell4,cell5);tbody.append(tr);
+      tr.append(cell5);tbody.append(tr);
     });table.append(tbody);wrap.append(table);root.append(wrap);
+    const count=document.createElement('p');count.className='result-count';count.textContent=visibleTasks().length+' / '+liveTasks().length+' 件を表示';root.append(count);
   }
   function renderBoard(root){
     const board=document.createElement('div');board.className='board';
     STATUS.forEach(status=>{
-      const lane=document.createElement('div');lane.className='board-lane';const items=liveTasks().filter(t=>t.status===status);
+      const lane=document.createElement('div');lane.className='board-lane';const items=visibleTasks().filter(t=>t.status===status);
       const head=document.createElement('div');head.className='lane-header';head.innerHTML=`<span>${escapeHtml(status)}</span><small>${items.length}</small>`;lane.append(head);
-      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'');card.append(title,meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
+      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns().map(c=>' · '+c.name+': '+customValue(t,c.id)).join('');card.append(title,meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
       if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='タスクなし';lane.append(empty);}board.append(lane);
     });root.append(board);
   }
@@ -244,7 +355,7 @@
   function download(filename,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'application/json'}));a.download=filename;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);}
   function exportData(){download('vctrmemo-backup-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({...state,sync:engine.export(),exportedAt:new Date().toISOString()},null,2));toast('変更履歴を含むJSONバックアップを書き出しました。');}
   function mergeRecords(local,remote){const m=new Map(local.map(x=>[x.id,x]));for(const x of remote){if(!x||typeof x.id!=='string')continue;const prev=m.get(x.id);if(!prev||Number(x.updatedAt)>Number(prev.updatedAt))m.set(x.id,structuredClone(x));}return [...m.values()];}
-  function mergeState(received){if(!validate(received))return false;state.pages=mergeRecords(state.pages,received.pages);state.tasks=mergeRecords(state.tasks,received.tasks);persist();render();return true;}
+  function mergeState(received){if(!validate(received))return false;state.pages=mergeRecords(state.pages,received.pages);state.tasks=mergeRecords(state.tasks,received.tasks);state.dbColumns=mergeRecords(state.dbColumns||[],received.dbColumns||[]);persist();render();return true;}
   $('new-page').addEventListener('click',createPage);
   $('search-toggle').addEventListener('click',openSearch);
   $('search-close').addEventListener('click',closeSearch);
