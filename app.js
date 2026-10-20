@@ -17,7 +17,7 @@
     pages:[
       {id:'welcome',title:'はじめに',icon:'✦',updatedAt:1,deleted:false,blocks:[
         {id:'w1',type:'heading',text:'自分の情報は、自分の手元に。',checked:false},
-        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.7 では、別データベースとのリレーションと埋め込み表示設定を利用できます。',checked:false},
+        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.8 では逆参照、件数と数値合計の集計、データベースのアーカイブと復元ができます。',checked:false},
         {id:'w3',type:'subheading',text:'できること',checked:false},
         {id:'w4',type:'todo',text:'ページを新規作成・編集する',checked:false},
         {id:'w5',type:'todo',text:'タスクをテーブル・カンバンで管理する',checked:false},
@@ -64,6 +64,7 @@
   const DEFAULT_DB = VctrSync.DEFAULT_DATABASE_ID || 'db_default';
   const liveDatabases = () => (state.databases||[]).filter(d=>!d.deleted);
   const getDatabase = id => liveDatabases().find(d=>d.id===id);
+  const archivedDatabases = () => (state.databases||[]).filter(d=>d.deleted && d.id!==DEFAULT_DB);
   const liveTasks = (dbId) => state.tasks.filter(t => !t.deleted && (!dbId || (t.dbId||DEFAULT_DB)===dbId));
   const liveColumns = (dbId) => (state.dbColumns||[]).filter(c=>!c.deleted && (!dbId || (c.dbId||DEFAULT_DB)===dbId));
   const customValue = (t,id) => String(t.properties?.[id]??'');
@@ -182,6 +183,18 @@
     const dbSection=document.createElement('div');dbSection.className='sidebar-section-label';dbSection.textContent='DATABASES';
     dbSection.append(button('＋','plus',createDatabase,'データベースを追加'));nav.appendChild(dbSection);
     liveDatabases().forEach(db=>nav.appendChild(navButton('db:'+db.id,db.icon||'▦',db.title,String(liveTasks(db.id).length))));
+    if(archivedDatabases().length){
+      const archived=document.createElement('div');archived.className='sidebar-section-label';archived.textContent='ARCHIVED DATABASES';
+      nav.appendChild(archived);
+      for(const db of archivedDatabases()){
+        const holder=document.createElement('div');holder.className='archived-db-entry';
+        const name=document.createElement('span');name.textContent=db.title;
+        const restore=button('復元','subtle-button',()=>{
+          db.deleted=false;persist();render();toast('データベースを復元しました。');
+        },'データを残したまま復元');
+        holder.append(name,restore);nav.appendChild(holder);
+      }
+    }
     const label=document.createElement('div');label.className='sidebar-section-label';label.style.paddingTop='16px';label.textContent='PAGES';nav.appendChild(label);
     pageTree().forEach(({page,depth})=>{const item=navButton(page.id,page.icon,page.title,'');
       item.classList.add('tree-item');item.style.paddingLeft=(12+Math.min(depth,8)*15)+'px';
@@ -354,24 +367,60 @@
     const name=prompt('列の名前を編集（最大80文字）',col.name);
     if(name===null)return;
     if(!name.trim()){toast('列名は空にできません。');return;}
+    if(['backlink','rollup'].includes(col.type)){
+      col.name=name.trim().slice(0,80);persist();render();return;
+    }
     const type=prompt('列の種類: text / number / date / checkbox / relation',col.type);
     if(type===null)return;
     if(!['text','number','date','checkbox','relation'].includes(type)){toast('対応していない列の種類です。');return;}
     const target=type==='relation'?chooseRelationDatabase(col.targetDbId||''):'';
     if(type==='relation'&&!target){toast('参照先が選択されていません。');return;}
+    const linked=liveColumns().some(c=>['backlink','rollup'].includes(c.type)&&c.sourceColumnId===col.id);
+    if(linked&&(type!=='relation'||target!==col.targetDbId)){
+      toast('この列には逆参照・集計列があります。参照先の変更はできません。');return;
+    }
     const changedTarget=(col.targetDbId||'')!==target || col.type!==type;
     const invalid=changedTarget?liveTasks(col.dbId||DEFAULT_DB).filter(t=>!isCompatibleColumnValue(customValue(t,col.id),type,target)):[];
 
     if(invalid.length){toast('変更できません。既存の '+invalid.length+' 件の値が '+type+' 形式に合いません。');return;}
     col.name=name.trim().slice(0,80);col.type=type;col.targetDbId=target;persist();render();toast('列設定を保存しました。');
   }
+  function addRollupColumn(dbId,name){
+    const sources=liveColumns().filter(c=>c.type==='relation'&&c.targetDbId===dbId&&getDatabase(c.dbId));
+    if(!sources.length){toast('このデータベースを参照するリレーション列が必要です。');return;}
+    const index=prompt('集計するリレーション列の番号を選択\n'+sources.map((c,i)=>(i+1)+': '+(getDatabase(c.dbId)?.title||'')+' / '+c.name).join('\n'),'1');
+    if(index===null)return;
+    const source=sources[Number(index)-1];if(!source){toast('選択が不正です。');return;}
+    const op=prompt('集計方法: count（件数） / sum（数値合計）','count');
+    if(op===null)return;
+    if(!['count','sum'].includes(op)){toast('count または sum を選択してください。');return;}
+    let rollupFieldId='';
+    if(op==='sum'){
+      const numeric=liveColumns(source.dbId||DEFAULT_DB).filter(c=>c.type==='number');
+      if(!numeric.length){toast('参照元に数値型の列が必要です。');return;}
+      const n=prompt('合計する数値列の番号を選択\n'+numeric.map((c,i)=>(i+1)+': '+c.name).join('\n'),'1');
+      if(n===null)return;
+      const chosen=numeric[Number(n)-1];if(!chosen){toast('選択が不正です。');return;}
+      rollupFieldId=chosen.id;
+    }
+    state.dbColumns.push({id:uid(),dbId,name,type:'rollup',sourceColumnId:source.id,sourceDbId:source.dbId||DEFAULT_DB,rollupOp:op,rollupFieldId,deleted:false});
+    persist();render();
+  }
   function addColumn(dbId=DEFAULT_DB){
     const name=prompt('追加する列の名前（最大80文字）');if(!name?.trim())return;
-    const type=prompt('列の種類: text / number / date / checkbox / relation','text');
-    if(!['text','number','date','checkbox','relation'].includes(type)){toast('対応していない列の種類です。');return;}
+    const type=prompt('列の種類: text / number / date / checkbox / relation / rollup','text');
+    if(!['text','number','date','checkbox','relation','rollup'].includes(type)){toast('対応していない列の種類です。');return;}
+    if(type==='rollup'){addRollupColumn(dbId,name.trim().slice(0,80));return;}
     const targetDbId=type==='relation'?chooseRelationDatabase():'';
     if(type==='relation'&&!targetDbId){toast('参照先が選択されていません。');return;}
-    state.dbColumns.push({id:uid(),dbId,name:name.trim().slice(0,80),type,targetDbId,deleted:false});persist();render();
+    const col={id:uid(),dbId,name:name.trim().slice(0,80),type,targetDbId,deleted:false};
+    state.dbColumns.push(col);
+    if(type==='relation'){
+      const origin=getDatabase(dbId)?.title||'データベース';
+      state.dbColumns.push({id:uid(),dbId:targetDbId,name:(origin+' ← '+col.name).slice(0,80),
+        type:'backlink',sourceColumnId:col.id,sourceDbId:dbId,deleted:false});
+    }
+    persist();render();
   }
   function setCustom(t,col,value){
     if(!t.properties)t.properties={};
@@ -379,6 +428,19 @@
   }
   function columnCell(t,col){
     const td=document.createElement('td');const raw=customValue(t,col.id);
+    if(col.type==='backlink'){
+      td.className='derived-cell';
+      const matches=VctrSync.backlinksFor(state,t.id,col.sourceColumnId);
+      if(!matches.length){td.textContent='—';return td;}
+      for(const item of matches)td.append(button(item.task.title||'無題','derived-link',()=>setView('task:'+item.task.id),'参照元レコードへ移動'));
+      return td;
+    }
+    if(col.type==='rollup'){
+      td.className='derived-cell';
+      const value=VctrSync.rollupFor(state,t.id,col);
+      td.textContent=value===null?'設定を確認':String(value);
+      return td;
+    }
     const input=document.createElement('input');input.setAttribute('aria-label',col.name);input.dataset.columnId=col.id;
     input.className=col.type==='checkbox'?'task-check':'task-input';
     if(col.type==='relation'){
@@ -418,6 +480,10 @@
         db.title=name.trim().slice(0,80);persist();render();
       });
       actions.append(rename);
+      if(db.id!==DEFAULT_DB)actions.append(button('アーカイブ','subtle-button danger',()=>{
+        if(!confirm('「'+db.title+'」をアーカイブしますか？ レコード '+liveTasks(db.id).length+'件と列・変更履歴は残ります。左側から復元できます。'))return;
+        db.deleted=true;persist();setView('home');
+      }));
       root.append(actions);
     }
     const displayMode=embedded?(block?.viewMode==='board'?'board':'table'):dbMode;
@@ -449,7 +515,13 @@
     for(const title of ['名前','ステータス','優先度','期限']){const th=document.createElement('th');th.textContent=title;hdr.append(th);}
     for(const c of liveColumns(dbId)){
       const th=document.createElement('th');const label=document.createElement('span');label.textContent=c.name+' ';
-      th.append(label,button('⚙','column-settings',()=>editColumn(c),'列名・種類を編集'),button('×','column-delete',()=>{if(!confirm('列「'+c.name+'」を非表示にしますか？ 値は履歴に残ります。'))return;c.deleted=true;persist();render();},'列を非表示'));
+      th.append(label,button('⚙','column-settings',()=>editColumn(c),'列設定を編集'),button('×','column-delete',()=>{
+        if(c.type==='relation'&&liveColumns().some(x=>['backlink','rollup'].includes(x.type)&&x.sourceColumnId===c.id)){
+          toast('逆参照・集計列を先に非表示にしてください。');return;
+        }
+        if(!confirm('列「'+c.name+'」を非表示にしますか？ 値は履歴に残ります。'))return;
+        c.deleted=true;persist();render();
+      },'列を非表示'));
       hdr.append(th);
     }
     const end=document.createElement('th');hdr.append(end);thead.append(hdr);table.append(thead);
@@ -473,7 +545,9 @@
       const head=document.createElement('div');head.className='lane-header';head.innerHTML=`<span>${escapeHtml(status)}</span><small>${items.length}</small>`;lane.append(head);
       items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns(dbId).map(c=>{
           const raw=customValue(t,c.id),related=c.type==='relation'?getTask(raw):null;
-          return ' · '+c.name+': '+(related?related.title:raw);
+          const derived=c.type==='rollup'?VctrSync.rollupFor(state,t.id,c):
+            c.type==='backlink'?VctrSync.backlinksFor(state,t.id,c.sourceColumnId).length:null;
+          return ' · '+c.name+': '+(derived!==null?derived:(related?related.title:raw));
         }).join('');card.append(title,button('詳細を開く ↗','record-open',()=>setView('task:'+t.id)),meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
       if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='タスクなし';lane.append(empty);}board.append(lane);
     });root.append(board);
@@ -502,6 +576,13 @@
     date.addEventListener('change',()=>{task.due=date.value;touchTask(task);});fields.append(field('期限',date));
     for(const col of liveColumns(task.dbId||DEFAULT_DB)){const cell=columnCell(task,col);fields.append(field(col.name,cell.firstChild));}
     root.append(fields);
+    const referring=VctrSync.backlinksFor(state,task.id);
+    if(referring.length){
+      const section=document.createElement('section');section.className='record-references';
+      const h=document.createElement('h3');h.textContent='このレコードを参照しているレコード（'+referring.length+'件）';section.append(h);
+      for(const item of referring)section.append(button((item.task.title||'無題')+' · '+item.column.name,'derived-link',()=>setView('task:'+item.task.id)));
+      root.append(section);
+    }
     const heading=document.createElement('h2');heading.className='record-description';heading.textContent='本文';root.append(heading);
     const help=document.createElement('p');help.className='doc-hint';help.textContent='このタスク固有のページです。メモ、チェックリスト、他ページへのリンクを追加できます。';root.append(help);
     const editor=document.createElement('div');editor.className='editor';editor.id='editor';root.append(editor);

@@ -10,7 +10,7 @@
   const PAGE_FIELDS = ['title','icon','parentId','taskId','deleted','_pos'];
   const BLOCK_FIELDS = ['type','text','targetId','viewMode','viewLimit','checked','deleted','_pos'];
   const TASK_FIELDS = ['title','status','priority','due','dbId','deleted','_pos'];
-  const COLUMN_FIELDS = ['name','type','dbId','targetDbId','deleted','_pos'];
+  const COLUMN_FIELDS = ['name','type','dbId','targetDbId','sourceColumnId','sourceDbId','rollupOp','rollupFieldId','deleted','_pos'];
   const DATABASE_FIELDS = ['title','icon','deleted','_pos'];
   const DEFAULT_DATABASE_ID = 'db_default';
   const CELL_FIELDS = ['value'];
@@ -48,6 +48,7 @@
     for(const c of state.dbColumns){
       if(typeof c.dbId!=='string'||!c.dbId)c.dbId=DEFAULT_DATABASE_ID;
       if(typeof c.targetDbId!=='string')c.targetDbId='';
+      for(const field of ['sourceColumnId','sourceDbId','rollupOp','rollupFieldId'])if(typeof c[field]!=='string')c[field]='';
     }
     for(const t of state.tasks){
       if(!t.properties || typeof t.properties!=='object' || Array.isArray(t.properties))t.properties={};
@@ -108,12 +109,13 @@
     if(typeof v!=='string')return false;
     if(field==='text')return v.length<=30000;
     if(field==='name')return v.length>0&&v.length<=80;
-    if(field==='parentId'||field==='taskId'||field==='targetId'||field==='dbId'||field==='targetDbId')return v.length<=128;
+    if(['parentId','taskId','targetId','dbId','targetDbId','sourceColumnId','sourceDbId','rollupFieldId'].includes(field))return v.length<=128;
     if(field==='viewMode')return parts[0]==='B'&&['table','board'].includes(v);
+    if(field==='rollupOp')return parts[0]==='C'&&['','count','sum'].includes(v);
     if(field==='value')return v.length<=500;
     if(field==='title')return v.length<=400;
     if(field==='icon')return v.length<=15;
-    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox','relation']:['text','heading','subheading','todo','quote','code','link','database']).includes(v);
+    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox','relation','backlink','rollup']:['text','heading','subheading','todo','quote','code','link','database']).includes(v);
     if(field==='status')return ['未着手','進行中','完了'].includes(v);
     if(field==='priority')return ['低','中','高'].includes(v);
     if(field==='due')return v===''||/^\d{4}-\d\d-\d\d$/.test(v);
@@ -217,7 +219,7 @@
           if(!databases.has(p[1]))databases.set(p[1],{id:p[1],title:'データベース',icon:'▦',deleted:false,_pos:0});
           databases.get(p[1])[p[2]]=v;
         }else if(p[0]==='C'){
-          if(!columns.has(p[1]))columns.set(p[1],{id:p[1],name:'列',type:'text',dbId:DEFAULT_DATABASE_ID,targetDbId:'',deleted:false,_pos:0});
+          if(!columns.has(p[1]))columns.set(p[1],{id:p[1],name:'列',type:'text',dbId:DEFAULT_DATABASE_ID,targetDbId:'',sourceColumnId:'',sourceDbId:'',rollupOp:'',rollupFieldId:'',deleted:false,_pos:0});
           columns.get(p[1])[p[2]]=v;
         }else if(p[0]==='V'){
           cells.push({taskId:p[1],columnId:p[2],value:v});
@@ -243,5 +245,38 @@
     }
     export(){return {version:2,actor:this.actor,counter:this.counter,ops:[...this.ops.values()]};}
   }
-  return {Engine,flatten,parseKey,isValidOp,DEFAULT_DATABASE_ID};
+  // Computed backlinks never copy or mutate source cells; they derive from the
+  // original relation's single target ID and remain stable across sync merges.
+  function backlinksFor(state,targetId,sourceColumnId=''){
+    const target=(state.tasks||[]).find(t=>t.id===targetId && !t.deleted);
+    if(!target)return [];
+    const dbId=target.dbId||DEFAULT_DATABASE_ID;
+    const cols=(state.dbColumns||[]).filter(c=>!c.deleted && c.type==='relation' && c.targetDbId===dbId && (!sourceColumnId||c.id===sourceColumnId));
+    const out=[];
+    for(const col of cols){
+      for(const source of state.tasks||[]){
+        if(source.deleted || (source.dbId||DEFAULT_DATABASE_ID)!==(col.dbId||DEFAULT_DATABASE_ID))continue;
+        if(source.properties?.[col.id]===targetId)out.push({task:source,column:col});
+      }
+    }
+    return out;
+  }
+  function rollupFor(state,targetId,col){
+    if(!col || col.type!=='rollup')return null;
+    const source=(state.dbColumns||[]).find(c=>c.id===col.sourceColumnId && !c.deleted && c.type==='relation');
+    const target=(state.tasks||[]).find(t=>t.id===targetId && !t.deleted);
+    if(!source || !target || source.targetDbId!==(target.dbId||DEFAULT_DATABASE_ID))return null;
+    const links=backlinksFor(state,targetId,source.id);
+    if(col.rollupOp==='count')return links.length;
+    if(col.rollupOp!=='sum')return null;
+    const metric=(state.dbColumns||[]).find(c=>c.id===col.rollupFieldId && !c.deleted && c.type==='number' && (c.dbId||DEFAULT_DATABASE_ID)===(source.dbId||DEFAULT_DATABASE_ID));
+    if(!metric)return null;
+    return links.reduce((sum,entry)=>{
+      const raw=entry.task.properties?.[metric.id];
+      if(raw===undefined||raw===null||raw==='')return sum;
+      const n=Number(raw);
+      return Number.isFinite(n)?sum+n:sum;
+    },0);
+  }
+  return {Engine,flatten,parseKey,isValidOp,DEFAULT_DATABASE_ID,backlinksFor,rollupFor};
 });

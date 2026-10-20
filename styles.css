@@ -61,3 +61,13 @@
 .embed-view-settings .task-select{min-width:105px}
 .database-embed-controls{padding-bottom:10px}
 @media(max-width:680px){.relation-select{min-width:120px;max-width:170px}}
+
+/* v0.8 derived relations, rollups, archive/restore */
+.archived-db-entry{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 12px;color:var(--low);font-size:12px;min-width:0}
+.archived-db-entry span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.archived-db-entry button{flex-shrink:0;font-size:11px}
+.derived-cell{min-width:110px;line-height:1.6;white-space:normal;font-variant-numeric:tabular-nums}
+.derived-link{border:1px solid var(--border);border-radius:6px;background:#20312c;color:#b9e4d0;display:inline-block;padding:5px 8px;margin:2px;font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.derived-link:hover{background:#2e4c43}
+.record-references{border:1px solid var(--border);padding:14px;border-radius:10px;margin:16px 0}
+.record-references h3{font-size:13px;font-weight:600;margin:0 0 9px}
