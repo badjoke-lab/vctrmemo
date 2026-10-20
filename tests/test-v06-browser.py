@@ -44,7 +44,7 @@ with sync_playwright() as p:
         page.locator('#pages-list .tree-item').first.click()
         page.get_by_role('button',name='＋ ブロックを追加').click()
         page.get_by_role('button',name='データベースを埋め込む').click()
-        selector=page.locator('.database-embed-controls select')
+        selector=page.locator('.database-embed-controls select[aria-label="埋め込みデータベース"]')
         selector.select_option(label='研究DB')
         assert page.locator('.embedded-database .task-table tbody tr').count()==1
         page.locator('.embedded-database .add-row button').click()
