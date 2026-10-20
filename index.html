@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>vctrmemo — v0.3 Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="webxdc.js"></script>
+  <script src="sync-core.js" defer></script>
+  <script src="transfer.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="brand-mark">V</span><span class="brand-copy"><strong>vctrmemo</strong><small>VECTOR · PROTOTYPE</small></span><button class="icon-button mobile-only" id="close-sidebar" title="閉じる" aria-label="サイドバーを閉じる">×</button></div>
+      <button class="sidebar-search" id="search-toggle"><span>⌕</span><span>検索する</span><kbd>⌘ K</kbd></button>
+      <div class="sidebar-section-label">ノート <button id="new-page" class="plus" title="ページを追加" aria-label="ページを追加">＋</button></div>
+      <nav id="pages-list" class="pages-list" aria-label="ページ"></nav>
+      <div class="side-bottom">
+        <div class="side-bottom-note"><span class="dot"></span><span>端末内に保存</span></div>
+        <div class="side-bottom-actions"><button id="export-json" class="subtle-button">⇩ エクスポート</button><button id="import-json" class="subtle-button">⇧ インポート</button></div>
+        <input type="file" id="import-file" accept=".json,application/json" hidden>
+      </div>
+    </aside>
+    <div class="mobile-shade" id="mobile-shade"></div>
+    <main class="main">
+      <header class="topbar"><div class="crumb"><button class="icon-button mobile-only" id="open-sidebar" aria-label="メニューを開く">☰</button><span class="faint">vctrmemo</span><span class="slash">/</span><strong id="crumb-page">Overview</strong></div><div class="top-actions"><span class="save-state" id="save-state">● 保存済み</span><button id="show-conflicts" class="outline-button" hidden>⚠ 競合</button><button id="sync-now" class="outline-button" title="Vectorチャットに変更履歴を手動共有">↗ 変更を共有</button></div></header>
+      <div id="content-area" class="content-area"></div>
+    </main>
+  </div>
+  <div class="dialog-backdrop hidden" id="search-backdrop" role="presentation"><div class="search-dialog" role="dialog" aria-modal="true" aria-label="検索"><div class="dialog-head"><span>⌕</span><input id="search-input" placeholder="ページ・タスクを検索…" autocomplete="off"><button id="search-close" class="icon-button" aria-label="検索を閉じる">×</button></div><div id="search-results" class="search-results"></div></div></div>
+  <div class="dialog-backdrop hidden" id="conflict-backdrop" role="presentation"><div class="conflict-dialog" role="dialog" aria-modal="true" aria-label="編集の競合"><div class="conflict-head"><h2>編集の競合</h2><button id="close-conflicts" class="icon-button" aria-label="閉じる">×</button></div><p class="conflict-help">同じ項目が別々に編集されました。内容を比較して採用する版を選択できます。</p><div id="conflict-list"></div></div></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
