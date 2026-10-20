@@ -25,3 +25,21 @@
 .task-check { width:18px; height:18px; cursor:pointer; }
 .result-count { font-size:12px; opacity:.75; margin-top:8px; }
 @media(max-width:680px){ .db-toolbar > * { flex:1; min-width:125px; } }
+
+
+/* v0.5 — linked blocks, task documents and safe column editing */
+.page-link-block { display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1; min-width:0; padding:8px 0; }
+.page-link-block select { min-width:160px; max-width:320px; }
+.page-link-open { border:1px solid #527769; background:#182f28; color:#bcebd9; border-radius:7px; padding:8px 12px; text-align:left; }
+.page-link-open:hover { background:#28443a; }
+.backlinks { display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin:8px 0 19px; font-size:12px; color:var(--muted); }
+.record-open { display:inline-block; margin-left:7px; border:1px solid var(--border); border-radius:6px; background:#1c3029; padding:5px 8px; font-size:11px; color:var(--teal); }
+.record-open:hover { background:#2a473b; }
+.record-back { margin-bottom:26px; }
+.record-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin:22px 0 31px; }
+.record-field { display:flex; flex-direction:column; gap:9px; padding:13px; background:var(--panel); border:1px solid var(--border); border-radius:8px; min-width:0; }
+.record-field>span { color:var(--muted); font-size:11px; }
+.record-field>input,.record-field>select { width:100%; min-width:0; }
+.record-description { font-size:16px; margin:0 0 10px; }
+.column-settings { background:transparent; color:var(--teal); border:0; padding:4px; }
+@media(max-width:680px){ .record-fields {grid-template-columns:1fr;} }

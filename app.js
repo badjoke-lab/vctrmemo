@@ -11,13 +11,13 @@
   const uid = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2));
   const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stamp = () => Date.now();
-  const makeBlock = (type='text', text='') => ({id:uid(), type, text, checked:false});
+  const makeBlock = (type='text', text='') => ({id:uid(), type, text, targetId:'', checked:false});
   const defaults = () => ({
     schema:1,
     pages:[
       {id:'welcome',title:'はじめに',icon:'✦',updatedAt:1,deleted:false,blocks:[
         {id:'w1',type:'heading',text:'自分の情報は、自分の手元に。',checked:false},
-        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.4 では、階層ページと列のカスタマイズ、絞り込み・並び替えを試せます。',checked:false},
+        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.5 では、ページリンク、タスク詳細ページとデータベースの列設定を試せます。',checked:false},
         {id:'w3',type:'subheading',text:'できること',checked:false},
         {id:'w4',type:'todo',text:'ページを新規作成・編集する',checked:false},
         {id:'w5',type:'todo',text:'タスクをテーブル・カンバンで管理する',checked:false},
@@ -59,7 +59,7 @@
   let filterField = 'all', filterQuery = '', sortField = 'none', sortDirection = 'asc';
   let pickerFor = null;
   let toastTimer;
-  const livePages = () => state.pages.filter(p => !p.deleted);
+  const livePages = () => state.pages.filter(p => !p.deleted && !p.taskId);
   const liveTasks = () => state.tasks.filter(t => !t.deleted);
   const liveColumns = () => (state.dbColumns||[]).filter(c=>!c.deleted);
   const customValue = (t,id) => String(t.properties?.[id]??'');
@@ -79,6 +79,7 @@
     return tasks;
   }
   const getPage = id => state.pages.find(p=>p.id===id && !p.deleted);
+  const getTaskFromView = id => typeof id==='string' && id.startsWith('task:') ? getTask(id.slice(5)) : null;
   const getTask = id => state.tasks.find(t=>t.id===id && !t.deleted);
   function toast(message) { const node=$('toast');node.textContent=message;node.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('show'),3300); }
   function persist(remote=false) {
@@ -173,7 +174,7 @@
     });
   }
   function navButton(id,icon,name,meta) {
-    const b=button('','page-link'+(view===id?' active':''),()=>setView(id));
+    const b=button('','page-link'+(view===id || (id==='tasks'&&view.startsWith('task:'))?' active':''),()=>setView(id));
     const i=document.createElement('span');i.className='page-icon';i.textContent=icon;
     const t=document.createElement('span');t.className='page-name';t.textContent=name;
     b.append(i,t);
@@ -211,6 +212,8 @@
     parentSelect.addEventListener('change',()=>{page.parentId=parentSelect.value;touchPage(page);render();});
     actions.append(parentSelect);
     actions.append(button('削除' ,'subtle-button danger',()=>{if(!confirm('このページを削除しますか？ JSONバックアップがない場合、復元できません。'))return;page.deleted=true;touchPage(page);setView('home');}));top.append(title,actions);root.append(top);
+    const backlinks=livePages().filter(p=>p.id!==page.id && p.blocks.some(b=>b.type==='link'&&b.targetId===page.id));
+    if(backlinks.length){const related=document.createElement('div');related.className='backlinks';related.append(document.createTextNode('このページへのリンク: '));for(const p of backlinks)related.append(button(p.title||'無題','subtle-button',()=>setView(p.id)));root.append(related);}
     const hint=document.createElement('p');hint.className='doc-hint';hint.textContent='入力は自動保存されます。Enterで新しいブロック、Shift+Enterで改行。';root.append(hint);
     const editor=document.createElement('div');editor.className='editor';editor.id='editor';root.append(editor);
     renderBlocks(editor,page);
@@ -223,6 +226,21 @@
       tools.append(button('＋','small-icon',()=>{pickerFor=pickerFor===block.id?null:block.id;renderBlocks(editor,page);},'この下にブロックを挿入'));
       tools.append(button('×','small-icon',()=>{page.blocks.splice(i,1);touchPage(page);renderBlocks(editor,page);},'ブロックを削除'));
       row.append(tools);
+      if(block.type==='link'){
+        const controls=document.createElement('div');controls.className='page-link-block';
+        const picker=document.createElement('select');picker.className='task-select';picker.setAttribute('aria-label','リンク先ページ');
+        const empty=document.createElement('option');empty.value='';empty.textContent='リンク先を選択';picker.append(empty);
+        for(const dest of livePages()){const option=document.createElement('option');option.value=dest.id;option.textContent=dest.title||'無題';picker.append(option);}
+        if(block.targetId && !getPage(block.targetId)){const missing=document.createElement('option');missing.value=block.targetId;missing.textContent='削除済みまたは不明なページ';picker.append(missing);}
+        picker.value=block.targetId||'';
+        picker.addEventListener('change',()=>{block.targetId=picker.value;touchPage(page);renderBlocks(editor,page);});
+        controls.append(picker);
+        const dest=getPage(block.targetId);
+        controls.append(button(dest?'↗ '+(dest.title||'無題'):'リンク先なし','page-link-open',()=>{if(dest)setView(dest.id);},'ページを開く'));
+        row.append(controls);editor.append(row);
+        if(pickerFor===block.id)editor.append(blockPicker(editor,page,i+1));
+        return;
+      }
       if(block.type==='todo'){
         const check=document.createElement('input');check.type='checkbox';check.className='todo-check';check.checked=!!block.checked;check.setAttribute('aria-label','チェック');check.addEventListener('change',()=>{block.checked=check.checked;touchPage(page);edit.style.textDecoration=check.checked?'line-through':'none';edit.style.color=check.checked?'#687d71':'';});row.append(check);
       }
@@ -241,7 +259,7 @@
   }
   function blockPicker(editor,page,index){
     const wrap=document.createElement('div');wrap.className='block-picker';
-    [['text','テキスト'],['heading','見出し H1'],['subheading','見出し H2'],['todo','チェック'],['quote','引用'],['code','コード']].forEach(([type,label])=>wrap.append(button(label,'',()=>{
+    [['text','テキスト'],['heading','見出し H1'],['subheading','見出し H2'],['todo','チェック'],['quote','引用'],['code','コード'],['link','ページへのリンク']].forEach(([type,label])=>wrap.append(button(label,'',()=>{
       const b=makeBlock(type);page.blocks.splice(index,0,b);pickerFor=null;touchPage(page);renderBlocks(editor,page);focusBlock(b.id);
     })));
     return wrap;
@@ -259,6 +277,27 @@
     const el=document.createElement('select');el.className='task-select';if(id)el.id=id;
     for(const [v,label] of options){const o=document.createElement('option');o.value=v;o.textContent=label;el.append(o);}
     el.value=options.some(([v])=>v===value)?value:options[0][0];el.addEventListener('change',()=>onChange(el.value));return el;
+  }
+  function isCompatibleColumnValue(raw,type){
+    if(raw==='')return true;
+    if(type==='text')return true;
+    if(type==='number')return raw.trim()!=='' && Number.isFinite(Number(raw));
+    if(type==='date'){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(raw))return false;
+      const d=new Date(raw+'T00:00:00Z');return !Number.isNaN(d.getTime()) && d.toISOString().slice(0,10)===raw;
+    }
+    return type==='checkbox' && (raw==='true'||raw==='false');
+  }
+  function editColumn(col){
+    const name=prompt('列の名前を編集（最大80文字）',col.name);
+    if(name===null)return;
+    if(!name.trim()){toast('列名は空にできません。');return;}
+    const type=prompt('列の種類: text / number / date / checkbox',col.type);
+    if(type===null)return;
+    if(!['text','number','date','checkbox'].includes(type)){toast('対応していない列の種類です。');return;}
+    const invalid=liveTasks().filter(t=>!isCompatibleColumnValue(customValue(t,col.id),type));
+    if(invalid.length){toast('変更できません。既存の '+invalid.length+' 件の値が '+type+' 形式に合いません。');return;}
+    col.name=name.trim().slice(0,80);col.type=type;persist();render();toast('列設定を保存しました。');
   }
   function addColumn(){
     const name=prompt('追加する列の名前（最大80文字）');if(!name?.trim())return;
@@ -306,13 +345,13 @@
     for(const title of ['名前','ステータス','優先度','期限']){const th=document.createElement('th');th.textContent=title;hdr.append(th);}
     for(const c of liveColumns()){
       const th=document.createElement('th');const label=document.createElement('span');label.textContent=c.name+' ';
-      th.append(label,button('×','column-delete',()=>{if(!confirm('列「'+c.name+'」を非表示にしますか？ 値は履歴に残ります。'))return;c.deleted=true;persist();render();},'列を非表示'));
+      th.append(label,button('⚙','column-settings',()=>editColumn(c),'列名・種類を編集'),button('×','column-delete',()=>{if(!confirm('列「'+c.name+'」を非表示にしますか？ 値は履歴に残ります。'))return;c.deleted=true;persist();render();},'列を非表示'));
       hdr.append(th);
     }
     const end=document.createElement('th');hdr.append(end);thead.append(hdr);table.append(thead);
     const tbody=document.createElement('tbody');visibleTasks().forEach(t=>{
       const tr=document.createElement('tr');
-      const cell1=document.createElement('td');const name=document.createElement('input');name.className='task-input';name.value=t.title;name.setAttribute('aria-label','タスク名');name.addEventListener('input',()=>{t.title=name.value.slice(0,400);touchTask(t);});cell1.append(name);
+      const cell1=document.createElement('td');const name=document.createElement('input');name.className='task-input';name.value=t.title;name.setAttribute('aria-label','タスク名');name.addEventListener('input',()=>{t.title=name.value.slice(0,400);touchTask(t);});cell1.append(name,button('↗','record-open',()=>setView('task:'+t.id),'詳細ページを開く'));
       const cell2=document.createElement('td');cell2.append(taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);}));
       const cell3=document.createElement('td');cell3.append(taskSelect(t.priority,PRIORITY,v=>{t.priority=v;touchTask(t);}));
       const cell4=document.createElement('td');const date=document.createElement('input');date.type='date';date.className='task-date';date.value=t.due||'';date.setAttribute('aria-label','期限');date.addEventListener('change',()=>{t.due=date.value;touchTask(t);});cell4.append(date);
@@ -328,17 +367,48 @@
     STATUS.forEach(status=>{
       const lane=document.createElement('div');lane.className='board-lane';const items=visibleTasks().filter(t=>t.status===status);
       const head=document.createElement('div');head.className='lane-header';head.innerHTML=`<span>${escapeHtml(status)}</span><small>${items.length}</small>`;lane.append(head);
-      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns().map(c=>' · '+c.name+': '+customValue(t,c.id)).join('');card.append(title,meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
+      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns().map(c=>' · '+c.name+': '+customValue(t,c.id)).join('');card.append(title,button('詳細を開く ↗','record-open',()=>setView('task:'+t.id)),meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
       if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='タスクなし';lane.append(empty);}board.append(lane);
     });root.append(board);
   }
+  function renderTaskDetail(root,task){
+    // A stable document ID means different devices will attach edits to one task page.
+    // The task title and properties remain authoritative in the task record.
+    let page=state.pages.find(p=>!p.deleted && p.taskId===task.id);
+    if(!page){
+      page={id:'taskdoc_'+task.id,title:task.title,icon:'▦',parentId:'',taskId:task.id,
+        updatedAt:stamp(),deleted:false,blocks:[]};
+      state.pages.push(page);persist();
+    }
+    const back=document.createElement('div');back.className='record-back';
+    back.append(button('← データベースへ戻る','subtle-button',()=>setView('tasks')));root.append(back);
+    const kicker=document.createElement('div');kicker.className='eyebrow';kicker.textContent='DATABASE / RECORD';root.append(kicker);
+    const title=document.createElement('input');title.className='doc-title';title.id='record-title';
+    title.setAttribute('aria-label','タスク名');title.value=task.title;
+    title.addEventListener('input',()=>{task.title=title.value.slice(0,400);touchTask(task);$('crumb-page').textContent=task.title||'無題';});root.append(title);
+    const fields=document.createElement('div');fields.className='record-fields';
+    function field(label,control){const wrap=document.createElement('label');wrap.className='record-field';
+      const text=document.createElement('span');text.textContent=label;wrap.append(text,control);return wrap;}
+    fields.append(field('ステータス',taskSelect(task.status,STATUS,v=>{task.status=v;touchTask(task);})),
+      field('優先度',taskSelect(task.priority,PRIORITY,v=>{task.priority=v;touchTask(task);}))); 
+    const date=document.createElement('input');date.className='task-date';date.type='date';date.value=task.due||'';
+    date.addEventListener('change',()=>{task.due=date.value;touchTask(task);});fields.append(field('期限',date));
+    for(const col of liveColumns()){const cell=columnCell(task,col);fields.append(field(col.name,cell.firstChild));}
+    root.append(fields);
+    const heading=document.createElement('h2');heading.className='record-description';heading.textContent='本文';root.append(heading);
+    const help=document.createElement('p');help.className='doc-hint';help.textContent='このタスク固有のページです。メモ、チェックリスト、他ページへのリンクを追加できます。';root.append(help);
+    const editor=document.createElement('div');editor.className='editor';editor.id='editor';root.append(editor);
+    renderBlocks(editor,page);
+  }
   function render(){
     renderSidebar();
-    const page=getPage(view);$('crumb-page').textContent=view==='home'?'Overview':view==='tasks'?'データベース':page?.title||'Overview';
-    if(view!=='home'&&view!=='tasks'&&!page)view='home';
+    const task=getTaskFromView(view),page=getPage(view);
+    if(view!=='home'&&view!=='tasks'&&!page&&!task)view='home';
+    $('crumb-page').textContent=view==='home'?'Overview':view==='tasks'?'データベース':task?.title||page?.title||'Overview';
     const root=$('content-area');root.replaceChildren();
     if(view==='home')renderHome(root);
     else if(view==='tasks')renderTasks(root);
+    else if(task)renderTaskDetail(root,task);
     else renderDoc(root,page);
   }
   function openSidebar(){$('sidebar').classList.add('open');$('mobile-shade').classList.add('show');}
@@ -349,7 +419,7 @@
     const out=$('search-results');out.replaceChildren();let matches=0;const needle=q.trim().toLocaleLowerCase();
     const add=(icon,title,sub,target)=>{const b=button('','search-item',()=>{setView(target);closeSearch();});const i=document.createElement('span');i.textContent=icon;const desc=document.createElement('span');const strong=document.createElement('strong');strong.textContent=title;const small=document.createElement('small');small.textContent=sub;desc.append(strong,small);b.append(i,desc);out.append(b);matches++;};
     livePages().forEach(p=>{if(!needle||(p.title+' '+p.blocks.map(b=>b.text).join(' ')).toLocaleLowerCase().includes(needle))add(p.icon,p.title,'ページ',p.id);});
-    liveTasks().forEach(t=>{if(!needle||t.title.toLocaleLowerCase().includes(needle))add('▦',t.title,'タスク · '+t.status,'tasks');});
+    liveTasks().forEach(t=>{if(!needle||t.title.toLocaleLowerCase().includes(needle))add('▦',t.title,'タスク · '+t.status,'task:'+t.id);});
     if(!matches){const empty=document.createElement('div');empty.className='empty';empty.textContent='一致する結果がありません。';out.append(empty);}
   }
   function download(filename,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'application/json'}));a.download=filename;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);}

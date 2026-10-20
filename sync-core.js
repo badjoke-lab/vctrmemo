@@ -7,8 +7,8 @@
   root.VctrSync = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
-  const PAGE_FIELDS = ['title','icon','parentId','deleted','_pos'];
-  const BLOCK_FIELDS = ['type','text','checked','deleted','_pos'];
+  const PAGE_FIELDS = ['title','icon','parentId','taskId','deleted','_pos'];
+  const BLOCK_FIELDS = ['type','text','targetId','checked','deleted','_pos'];
   const TASK_FIELDS = ['title','status','priority','due','deleted','_pos'];
   const COLUMN_FIELDS = ['name','type','deleted','_pos'];
   const CELL_FIELDS = ['value'];
@@ -41,7 +41,12 @@
     if(!Array.isArray(state.dbColumns))state.dbColumns=[];
     fillInsertedPositions(state.dbColumns);
     for(const t of state.tasks)if(!t.properties || typeof t.properties!=='object' || Array.isArray(t.properties))t.properties={};
-    for(const p of state.pages){if(!Array.isArray(p.blocks))p.blocks=[];fillInsertedPositions(p.blocks);}
+    for(const p of state.pages){
+      if(typeof p.taskId!=='string')p.taskId='';
+      if(!Array.isArray(p.blocks))p.blocks=[];
+      for(const b of p.blocks)if(typeof b.targetId!=='string')b.targetId='';
+      fillInsertedPositions(p.blocks);
+    }
   }
   function flatten(state){
     prepare(state);
@@ -85,11 +90,11 @@
     if(typeof v!=='string')return false;
     if(field==='text')return v.length<=30000;
     if(field==='name')return v.length>0&&v.length<=80;
-    if(field==='parentId')return v.length<=128;
+    if(field==='parentId'||field==='taskId'||field==='targetId')return v.length<=128;
     if(field==='value')return v.length<=500;
     if(field==='title')return v.length<=400;
     if(field==='icon')return v.length<=15;
-    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox']:['text','heading','subheading','todo','quote','code']).includes(v);
+    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox']:['text','heading','subheading','todo','quote','code','link']).includes(v);
     if(field==='status')return ['未着手','進行中','完了'].includes(v);
     if(field==='priority')return ['低','中','高'].includes(v);
     if(field==='due')return v===''||/^\d{4}-\d\d-\d\d$/.test(v);
@@ -184,7 +189,7 @@
       for(const [k,v] of this.values){
         const p=parseKey(k);if(!p)continue;
         if(p[0]==='P'){
-          if(!pages.has(p[1]))pages.set(p[1],{id:p[1],title:'無題',icon:'◈',parentId:'',deleted:false,blocks:[],_pos:0,updatedAt:1});
+          if(!pages.has(p[1]))pages.set(p[1],{id:p[1],title:'無題',icon:'◈',parentId:'',taskId:'',deleted:false,blocks:[],_pos:0,updatedAt:1});
           pages.get(p[1])[p[2]]=v;
         }else if(p[0]==='T'){
           if(!tasks.has(p[1]))tasks.set(p[1],{id:p[1],title:'無題',status:'未着手',priority:'中',due:'',deleted:false,properties:{},_pos:0,updatedAt:1});
@@ -196,7 +201,7 @@
           cells.push({taskId:p[1],columnId:p[2],value:v});
         }else{
           const k2=p[1]+'\u0000'+p[2];
-          if(!blocks.has(k2))blocks.set(k2,{pageId:p[1],id:p[2],text:'',type:'text',checked:false,deleted:false,_pos:0});
+          if(!blocks.has(k2))blocks.set(k2,{pageId:p[1],id:p[2],text:'',targetId:'',type:'text',checked:false,deleted:false,_pos:0});
           blocks.get(k2)[p[3]]=v;
         }
       }
