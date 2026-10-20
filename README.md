@@ -1,7 +1,15 @@
-# vctrmemo v0.5 — WebXDC Mini App 試作版
+# vctrmemo v0.6 — WebXDC Mini App 試作版
 
 Vector上で開く、ローカル優先のメモ・タスク管理アプリです。Notion相当の製品ではありません。
 
+
+## v0.6（複数データベース・ページ内埋め込み）
+
+- 左側「DATABASES」の＋から複数の独立したデータベースを作れます。データベースの名前変更に対応します。
+- タスク・カスタム列それぞれに `dbId` を保存し、テーブル・カンバン・列設定・フィルターをデータベースごとに分離します。
+- ページの「＋ ブロックを追加」から「データベースを埋め込む」を選択すると、既存のデータベースをページ内で表示・編集できます。**複製ではなく同じ元データ**を参照します。
+- v0.5以前の変更履歴は、旧タスク・旧カスタム列を既定の `db_default` に割り当てて読み込みます。保存キー `vctrmemo-v2` と同期形式 `version:2` は継続します。
+- データベースのアクセス制御、独立した列ごとの共有設定、自動同期、Vector実機間の配送および端末内暗号化は未実装・未検証です。機密情報は入力しないでください。
 
 ## v0.5（タスク詳細・ページリンク・列設定）
 
@@ -47,7 +55,7 @@ Vector上で開く、ローカル優先のメモ・タスク管理アプリで�
 - ローカルデータは未暗号化で、アプリ独自の認可・ユーザー管理はありません。機密データを入れないでください。
 - Yjs等の文字単位CRDTではありません。同一項目への並行編集は自動で結合せず、両方の候補を保持して選択させます。
 - 同期履歴は12,000操作が上限で、圧縮・ガベージコレクションは未実装です。1操作が送信サイズを超える場合は送れません。
-- 自動的な差分送信や大容量添付、アクセス権限、複数データベース、式・集計・リレーションDBなどNotionの主要機能は未実装です。
+- 自動的な差分送信や大容量添付、アクセス権限、式・集計・リレーションDBなどNotionの主要機能は未実装です。
 - 送信途中でアプリを閉じると残りの送信が中止されます。後で「変更を共有」を押すと全履歴を再送できます。
 - v0.1の`workspace-snapshot-v1`は因果順序を保持できないため自動統合しません。旧データを移すときはJSONを利用してください。
 
@@ -61,6 +69,7 @@ node tests/test-core.cjs
 node tests/test-transfer.cjs
 node tests/test-v04.cjs
 node tests/test-v05.cjs
+node tests/test-v06.cjs
 python tests/test-browser.py  # Chromium と Python Playwright がある環境のみ
 ```
 
@@ -100,5 +109,7 @@ python scripts/build.py
 python tests/test-package.py
 node tests/test-v04.cjs
 node tests/test-v05.cjs
+node tests/test-v06.cjs
 python tests/test-v05-browser.py
+python tests/test-v06-browser.py
 ```

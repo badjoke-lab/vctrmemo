@@ -17,7 +17,7 @@
     pages:[
       {id:'welcome',title:'はじめに',icon:'✦',updatedAt:1,deleted:false,blocks:[
         {id:'w1',type:'heading',text:'自分の情報は、自分の手元に。',checked:false},
-        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.5 では、ページリンク、タスク詳細ページとデータベースの列設定を試せます。',checked:false},
+        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.6 では、複数のデータベースを作り、ページ内に埋め込めます。',checked:false},
         {id:'w3',type:'subheading',text:'できること',checked:false},
         {id:'w4',type:'todo',text:'ページを新規作成・編集する',checked:false},
         {id:'w5',type:'todo',text:'タスクをテーブル・カンバンで管理する',checked:false},
@@ -30,6 +30,7 @@
         {id:'m1',type:'subheading',text:'議題',checked:false},
         {id:'m2',type:'todo',text:'目的と次のアクションを決める',checked:false}]}
     ],
+    databases:[{id:'db_default',title:'データベース',icon:'▦',updatedAt:1,deleted:false}],
     dbColumns:[],
     tasks:[
       {id:'task-1',title:'ページとデータベースの設計',status:'完了',priority:'高',due:'',updatedAt:1,deleted:false},
@@ -60,19 +61,25 @@
   let pickerFor = null;
   let toastTimer;
   const livePages = () => state.pages.filter(p => !p.deleted && !p.taskId);
-  const liveTasks = () => state.tasks.filter(t => !t.deleted);
-  const liveColumns = () => (state.dbColumns||[]).filter(c=>!c.deleted);
+  const DEFAULT_DB = VctrSync.DEFAULT_DATABASE_ID || 'db_default';
+  const liveDatabases = () => (state.databases||[]).filter(d=>!d.deleted);
+  const getDatabase = id => liveDatabases().find(d=>d.id===id);
+  const liveTasks = (dbId) => state.tasks.filter(t => !t.deleted && (!dbId || (t.dbId||DEFAULT_DB)===dbId));
+  const liveColumns = (dbId) => (state.dbColumns||[]).filter(c=>!c.deleted && (!dbId || (c.dbId||DEFAULT_DB)===dbId));
   const customValue = (t,id) => String(t.properties?.[id]??'');
   const taskValue = (t,id) => id.startsWith('custom:')?customValue(t,id.slice(7)):String(t[id]??'');
-  function visibleTasks(){
-    let tasks=liveTasks();const q=filterQuery.trim().toLocaleLowerCase();
+  function visibleTasks(dbId){
+    let tasks=liveTasks(dbId);const q=filterQuery.trim().toLocaleLowerCase();
+    const validFields=new Set(fieldOptions(true,dbId).map(([field])=>field));
+    const selectedFilter=validFields.has(filterField)?filterField:'all';
+    const selectedSort=sortField==='none'||validFields.has(sortField)?sortField:'none';
     if(q)tasks=tasks.filter(t=>{
-      if(filterField==='all')return [t.title,t.status,t.priority,t.due,...liveColumns().map(c=>customValue(t,c.id))].some(v=>String(v).toLocaleLowerCase().includes(q));
-      return taskValue(t,filterField).toLocaleLowerCase().includes(q);
+      if(selectedFilter==='all')return [t.title,t.status,t.priority,t.due,...liveColumns(dbId).map(c=>customValue(t,c.id))].some(v=>String(v).toLocaleLowerCase().includes(q));
+      return taskValue(t,selectedFilter).toLocaleLowerCase().includes(q);
     });
-    if(sortField!=='none')tasks=[...tasks].sort((a,b)=>{
-      const col=liveColumns().find(c=>sortField==='custom:'+c.id);
-      const va=taskValue(a,sortField),vb=taskValue(b,sortField);
+    if(selectedSort!=='none')tasks=[...tasks].sort((a,b)=>{
+      const col=liveColumns(dbId).find(c=>selectedSort==='custom:'+c.id);
+      const va=taskValue(a,selectedSort),vb=taskValue(b,selectedSort);
       const cmp=col?.type==='number'?((Number(va)||0)-(Number(vb)||0)):va.localeCompare(vb,'ja',{numeric:true});
       return (sortDirection==='desc'?-1:1)*cmp;
     });
@@ -140,6 +147,12 @@
   function touchTask(t) { t.updatedAt=stamp();persist(); }
   const button = (label, cls, onClick, title) => {const el=document.createElement('button');el.type='button';el.textContent=label;el.className=cls||'';if(title)el.title=title;el.addEventListener('click',onClick);return el;};
   function setView(next){ view=next; pickerFor=null;render();closeSidebar(); }
+  function createDatabase(){
+    const input=prompt('データベースの名前（最大80文字）','新しいデータベース');
+    if(!input?.trim())return;
+    const db={id:uid(),title:input.trim().slice(0,80),icon:'▦',deleted:false,updatedAt:stamp()};
+    state.databases.push(db);persist();setView('db:'+db.id);
+  }
   function pageTree(){
     const pages=livePages(), ids=new Set(pages.map(p=>p.id)), byParent=new Map();
     pages.forEach(p=>{const parent=p.parentId!==p.id&&ids.has(p.parentId)?p.parentId:'';
@@ -166,7 +179,9 @@
   function renderSidebar() {
     const nav=$('pages-list');nav.replaceChildren();
     nav.appendChild(navButton('home','⌂','Overview','概要'));
-    nav.appendChild(navButton('tasks','▦','データベース',String(liveTasks().length)));
+    const dbSection=document.createElement('div');dbSection.className='sidebar-section-label';dbSection.textContent='DATABASES';
+    dbSection.append(button('＋','plus',createDatabase,'データベースを追加'));nav.appendChild(dbSection);
+    liveDatabases().forEach(db=>nav.appendChild(navButton('db:'+db.id,db.icon||'▦',db.title,String(liveTasks(db.id).length))));
     const label=document.createElement('div');label.className='sidebar-section-label';label.style.paddingTop='16px';label.textContent='PAGES';nav.appendChild(label);
     pageTree().forEach(({page,depth})=>{const item=navButton(page.id,page.icon,page.title,'');
       item.classList.add('tree-item');item.style.paddingLeft=(12+Math.min(depth,8)*15)+'px';
@@ -174,7 +189,9 @@
     });
   }
   function navButton(id,icon,name,meta) {
-    const b=button('','page-link'+(view===id || (id==='tasks'&&view.startsWith('task:'))?' active':''),()=>setView(id));
+    const task=getTaskFromView(view);
+    const active=view===id || (id==='db:'+DEFAULT_DB && view==='tasks') || (task && id==='db:'+(task.dbId||DEFAULT_DB));
+    const b=button('','page-link'+(active?' active':''),()=>setView(id));
     const i=document.createElement('span');i.className='page-icon';i.textContent=icon;
     const t=document.createElement('span');t.className='page-name';t.textContent=name;
     b.append(i,t);
@@ -241,6 +258,30 @@
         if(pickerFor===block.id)editor.append(blockPicker(editor,page,i+1));
         return;
       }
+      if(block.type==='database'){
+        row.classList.add('database-block-row');
+        const controls=document.createElement('div');controls.className='database-embed-controls';
+        const picker=document.createElement('select');picker.className='task-select';picker.setAttribute('aria-label','埋め込みデータベース');
+        const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='データベースを選択';picker.append(placeholder);
+        for(const db of liveDatabases()){const option=document.createElement('option');option.value=db.id;option.textContent=db.title;picker.append(option);}
+        if(block.targetId&&!getDatabase(block.targetId)){const missing=document.createElement('option');missing.value=block.targetId;missing.textContent='削除済みのデータベース';picker.append(missing);}
+        picker.value=block.targetId||'';
+        picker.addEventListener('change',()=>{block.targetId=picker.value;touchPage(page);renderBlocks(editor,page);});
+        controls.append(picker);row.append(controls);
+        const db=getDatabase(block.targetId);
+        if(db){
+          const embed=document.createElement('div');
+          renderTasks(embed,db,true);
+          row.append(embed);
+        }else{
+          const missing=document.createElement('p');missing.className='doc-hint';
+          missing.textContent=block.targetId?'リンク先のデータベースが見つかりません。':'埋め込むデータベースを選んでください。';
+          row.append(missing);
+        }
+        editor.append(row);
+        if(pickerFor===block.id)editor.append(blockPicker(editor,page,i+1));
+        return;
+      }
       if(block.type==='todo'){
         const check=document.createElement('input');check.type='checkbox';check.className='todo-check';check.checked=!!block.checked;check.setAttribute('aria-label','チェック');check.addEventListener('change',()=>{block.checked=check.checked;touchPage(page);edit.style.textDecoration=check.checked?'line-through':'none';edit.style.color=check.checked?'#687d71':'';});row.append(check);
       }
@@ -259,8 +300,8 @@
   }
   function blockPicker(editor,page,index){
     const wrap=document.createElement('div');wrap.className='block-picker';
-    [['text','テキスト'],['heading','見出し H1'],['subheading','見出し H2'],['todo','チェック'],['quote','引用'],['code','コード'],['link','ページへのリンク']].forEach(([type,label])=>wrap.append(button(label,'',()=>{
-      const b=makeBlock(type);page.blocks.splice(index,0,b);pickerFor=null;touchPage(page);renderBlocks(editor,page);focusBlock(b.id);
+    [['text','テキスト'],['heading','見出し H1'],['subheading','見出し H2'],['todo','チェック'],['quote','引用'],['code','コード'],['link','ページへのリンク'],['database','データベースを埋め込む']].forEach(([type,label])=>wrap.append(button(label,'',()=>{
+      const b=makeBlock(type);if(type==='database')b.targetId=DEFAULT_DB;page.blocks.splice(index,0,b);pickerFor=null;touchPage(page);renderBlocks(editor,page);if(type!=='database')focusBlock(b.id);
     })));
     return wrap;
   }
@@ -269,9 +310,9 @@
     const s=document.createElement('select');s.className='task-select';
     options.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;s.append(o);});s.value=options.includes(value)?value:options[0];s.addEventListener('change',()=>onChange(s.value));return s;
   }
-  function fieldOptions(extraAll=false){
+  function fieldOptions(extraAll=false,dbId){
     return [...(extraAll?[['all','全項目']]:[]),['title','名前'],['status','ステータス'],['priority','優先度'],['due','期限'],
-      ...liveColumns().map(c=>['custom:'+c.id,c.name])];
+      ...liveColumns(dbId).map(c=>['custom:'+c.id,c.name])];
   }
   function fieldSelector(value,options,onChange,id){
     const el=document.createElement('select');el.className='task-select';if(id)el.id=id;
@@ -295,15 +336,15 @@
     const type=prompt('列の種類: text / number / date / checkbox',col.type);
     if(type===null)return;
     if(!['text','number','date','checkbox'].includes(type)){toast('対応していない列の種類です。');return;}
-    const invalid=liveTasks().filter(t=>!isCompatibleColumnValue(customValue(t,col.id),type));
+    const invalid=liveTasks(col.dbId||DEFAULT_DB).filter(t=>!isCompatibleColumnValue(customValue(t,col.id),type));
     if(invalid.length){toast('変更できません。既存の '+invalid.length+' 件の値が '+type+' 形式に合いません。');return;}
     col.name=name.trim().slice(0,80);col.type=type;persist();render();toast('列設定を保存しました。');
   }
-  function addColumn(){
+  function addColumn(dbId=DEFAULT_DB){
     const name=prompt('追加する列の名前（最大80文字）');if(!name?.trim())return;
     const type=prompt('列の種類: text / number / date / checkbox','text');
     if(!['text','number','date','checkbox'].includes(type)){toast('対応する種類は text / number / date / checkbox です。');return;}
-    state.dbColumns.push({id:uid(),name:name.trim().slice(0,80),type,deleted:false});persist();render();
+    state.dbColumns.push({id:uid(),dbId,name:name.trim().slice(0,80),type,deleted:false});persist();render();
   }
   function setCustom(t,col,value){
     if(!t.properties)t.properties={};
@@ -321,53 +362,72 @@
     }
     td.append(input);return td;
   }
-  function renderTasks(root){
-    root.innerHTML=intro('STRUCTURED THINKING','データベース','自由に列を追加し、表・カンバン・フィルター・ソートで管理できます。');
+  function renderTasks(root,db,embedded=false){
+    if(!db)return;
+    if(embedded){
+      root.className='embedded-database';
+      const heading=document.createElement('div');heading.className='embedded-database-header';
+      heading.append(button('▦ '+db.title,'subtle-button',()=>setView('db:'+db.id),'データベースを開く'));
+      root.replaceChildren(heading);
+    }else{
+      root.innerHTML=intro('STRUCTURED THINKING',db.title,'このデータベースのレコードだけを表示します。ページにも埋め込めます。');
+      const actions=document.createElement('div');actions.className='db-title-actions';
+      const rename=button('名前を変更','subtle-button',()=>{
+        const name=prompt('データベース名（最大80文字）',db.title);
+        if(!name?.trim())return;
+        db.title=name.trim().slice(0,80);persist();render();
+      });
+      actions.append(rename);
+      root.append(actions);
+    }
     const tabs=document.createElement('div');tabs.className='db-tabs';
     tabs.append(button('▦ テーブル','db-tab'+(dbMode==='table'?' active':''),()=>{dbMode='table';render();}));
     tabs.append(button('▥ カンバン','db-tab'+(dbMode==='board'?' active':''),()=>{dbMode='board';render();}));
-    tabs.append(button('＋ 列を追加','db-tab',addColumn));root.append(tabs);
+    tabs.append(button('＋ 列を追加','db-tab',()=>addColumn(db.id)));root.append(tabs);
     const toolbar=document.createElement('div');toolbar.className='db-toolbar';
-    const filter=fieldSelector(filterField,fieldOptions(true),value=>{filterField=value;render();},'filter-field');
-    const q=document.createElement('input');q.id='filter-query';q.className='task-input';q.placeholder='含まれる文字で絞り込み';q.value=filterQuery;
+    const filter=fieldSelector(filterField,fieldOptions(true,db.id),value=>{filterField=value;render();},embedded?null:'filter-field');
+    const q=document.createElement('input');if(!embedded)q.id='filter-query';q.className='task-input';q.placeholder='含まれる文字で絞り込み';q.value=filterQuery;
     q.addEventListener('change',()=>{filterQuery=q.value.slice(0,200);render();});
     q.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();q.blur();}});
-    const sort=fieldSelector(sortField,[['none','並び替えなし'],...fieldOptions()],value=>{sortField=value;render();},'sort-field');
-    const order=fieldSelector(sortDirection,[['asc','昇順'],['desc','降順']],value=>{sortDirection=value;render();},'sort-direction');
+    const sort=fieldSelector(sortField,[['none','並び替えなし'],...fieldOptions(false,db.id)],value=>{sortField=value;render();},embedded?null:'sort-field');
+    const order=fieldSelector(sortDirection,[['asc','昇順'],['desc','降順']],value=>{sortDirection=value;render();},embedded?null:'sort-direction');
     toolbar.append(filter,q,sort,order);root.append(toolbar);
-    if(dbMode==='table')renderTable(root);else renderBoard(root);
+    if(dbMode==='table')renderTable(root,db.id);else renderBoard(root,db.id);
     const bottom=document.createElement('div');bottom.className='add-row';
-    bottom.append(button('＋ 新しいタスク','primary-button',()=>{state.tasks.push({id:uid(),title:'新しいタスク',status:'未着手',priority:'中',due:'',properties:{},updatedAt:stamp(),deleted:false});persist();render();}));root.append(bottom);
+    bottom.append(button('＋ 新しいタスク','primary-button',()=>{
+      state.tasks.push({id:uid(),dbId:db.id,title:'新しいタスク',status:'未着手',priority:'中',due:'',properties:{},updatedAt:stamp(),deleted:false});
+      persist();render();
+    }));root.append(bottom);
   }
-  function renderTable(root){
+  function renderTable(root,dbId){
     const wrap=document.createElement('div');wrap.className='task-table-wrap';const table=document.createElement('table');table.className='task-table';
     const thead=document.createElement('thead'),hdr=document.createElement('tr');
     for(const title of ['名前','ステータス','優先度','期限']){const th=document.createElement('th');th.textContent=title;hdr.append(th);}
-    for(const c of liveColumns()){
+    for(const c of liveColumns(dbId)){
       const th=document.createElement('th');const label=document.createElement('span');label.textContent=c.name+' ';
       th.append(label,button('⚙','column-settings',()=>editColumn(c),'列名・種類を編集'),button('×','column-delete',()=>{if(!confirm('列「'+c.name+'」を非表示にしますか？ 値は履歴に残ります。'))return;c.deleted=true;persist();render();},'列を非表示'));
       hdr.append(th);
     }
     const end=document.createElement('th');hdr.append(end);thead.append(hdr);table.append(thead);
-    const tbody=document.createElement('tbody');visibleTasks().forEach(t=>{
+    const tbody=document.createElement('tbody');visibleTasks(dbId).forEach(t=>{
       const tr=document.createElement('tr');
       const cell1=document.createElement('td');const name=document.createElement('input');name.className='task-input';name.value=t.title;name.setAttribute('aria-label','タスク名');name.addEventListener('input',()=>{t.title=name.value.slice(0,400);touchTask(t);});cell1.append(name,button('↗','record-open',()=>setView('task:'+t.id),'詳細ページを開く'));
       const cell2=document.createElement('td');cell2.append(taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);}));
       const cell3=document.createElement('td');cell3.append(taskSelect(t.priority,PRIORITY,v=>{t.priority=v;touchTask(t);}));
       const cell4=document.createElement('td');const date=document.createElement('input');date.type='date';date.className='task-date';date.value=t.due||'';date.setAttribute('aria-label','期限');date.addEventListener('change',()=>{t.due=date.value;touchTask(t);});cell4.append(date);
       tr.append(cell1,cell2,cell3,cell4);
-      for(const col of liveColumns())tr.append(columnCell(t,col));
+      for(const col of liveColumns(dbId))tr.append(columnCell(t,col));
       const cell5=document.createElement('td');cell5.append(button('×','row-delete',()=>{if(!confirm('このタスクを削除しますか？'))return;t.deleted=true;touchTask(t);render();},'削除'));
       tr.append(cell5);tbody.append(tr);
     });table.append(tbody);wrap.append(table);root.append(wrap);
-    const count=document.createElement('p');count.className='result-count';count.textContent=visibleTasks().length+' / '+liveTasks().length+' 件を表示';root.append(count);
+    const count=document.createElement('p');count.className='result-count';count.textContent=visibleTasks(dbId).length+' / '+liveTasks(dbId).length+' 件を表示';root.append(count);
   }
-  function renderBoard(root){
+  function renderBoard(root,dbId){
     const board=document.createElement('div');board.className='board';
     STATUS.forEach(status=>{
-      const lane=document.createElement('div');lane.className='board-lane';const items=visibleTasks().filter(t=>t.status===status);
+      const lane=document.createElement('div');lane.className='board-lane';const items=visibleTasks(dbId).filter(t=>t.status===status);
       const head=document.createElement('div');head.className='lane-header';head.innerHTML=`<span>${escapeHtml(status)}</span><small>${items.length}</small>`;lane.append(head);
-      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns().map(c=>' · '+c.name+': '+customValue(t,c.id)).join('');card.append(title,button('詳細を開く ↗','record-open',()=>setView('task:'+t.id)),meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
+      items.forEach(t=>{const card=document.createElement('div');card.className='board-card';const title=document.createElement('div');title.className='board-card-title';title.textContent=t.title;const meta=document.createElement('div');meta.className='board-card-meta';meta.textContent='優先度 '+t.priority+(t.due?' · '+t.due:'')+liveColumns(dbId).map(c=>' · '+c.name+': '+customValue(t,c.id)).join('');card.append(title,button('詳細を開く ↗','record-open',()=>setView('task:'+t.id)),meta,taskSelect(t.status,STATUS,v=>{t.status=v;touchTask(t);render();}));lane.append(card);});
       if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='タスクなし';lane.append(empty);}board.append(lane);
     });root.append(board);
   }
@@ -381,7 +441,7 @@
       state.pages.push(page);persist();
     }
     const back=document.createElement('div');back.className='record-back';
-    back.append(button('← データベースへ戻る','subtle-button',()=>setView('tasks')));root.append(back);
+    back.append(button('← データベースへ戻る','subtle-button',()=>setView('db:'+(task.dbId||DEFAULT_DB))));root.append(back);
     const kicker=document.createElement('div');kicker.className='eyebrow';kicker.textContent='DATABASE / RECORD';root.append(kicker);
     const title=document.createElement('input');title.className='doc-title';title.id='record-title';
     title.setAttribute('aria-label','タスク名');title.value=task.title;
@@ -393,7 +453,7 @@
       field('優先度',taskSelect(task.priority,PRIORITY,v=>{task.priority=v;touchTask(task);}))); 
     const date=document.createElement('input');date.className='task-date';date.type='date';date.value=task.due||'';
     date.addEventListener('change',()=>{task.due=date.value;touchTask(task);});fields.append(field('期限',date));
-    for(const col of liveColumns()){const cell=columnCell(task,col);fields.append(field(col.name,cell.firstChild));}
+    for(const col of liveColumns(task.dbId||DEFAULT_DB)){const cell=columnCell(task,col);fields.append(field(col.name,cell.firstChild));}
     root.append(fields);
     const heading=document.createElement('h2');heading.className='record-description';heading.textContent='本文';root.append(heading);
     const help=document.createElement('p');help.className='doc-hint';help.textContent='このタスク固有のページです。メモ、チェックリスト、他ページへのリンクを追加できます。';root.append(help);
@@ -401,13 +461,14 @@
     renderBlocks(editor,page);
   }
   function render(){
+    let db=view==='tasks'?getDatabase(DEFAULT_DB):view.startsWith('db:')?getDatabase(view.slice(3)):null;
+    let task=getTaskFromView(view),page=getPage(view);
+    if(view!=='home'&&!db&&!page&&!task){view='home';db=null;task=null;page=null;}
     renderSidebar();
-    const task=getTaskFromView(view),page=getPage(view);
-    if(view!=='home'&&view!=='tasks'&&!page&&!task)view='home';
-    $('crumb-page').textContent=view==='home'?'Overview':view==='tasks'?'データベース':task?.title||page?.title||'Overview';
+    $('crumb-page').textContent=view==='home'?'Overview':db?.title||task?.title||page?.title||'Overview';
     const root=$('content-area');root.replaceChildren();
     if(view==='home')renderHome(root);
-    else if(view==='tasks')renderTasks(root);
+    else if(db)renderTasks(root,db);
     else if(task)renderTaskDetail(root,task);
     else renderDoc(root,page);
   }
@@ -419,13 +480,14 @@
     const out=$('search-results');out.replaceChildren();let matches=0;const needle=q.trim().toLocaleLowerCase();
     const add=(icon,title,sub,target)=>{const b=button('','search-item',()=>{setView(target);closeSearch();});const i=document.createElement('span');i.textContent=icon;const desc=document.createElement('span');const strong=document.createElement('strong');strong.textContent=title;const small=document.createElement('small');small.textContent=sub;desc.append(strong,small);b.append(i,desc);out.append(b);matches++;};
     livePages().forEach(p=>{if(!needle||(p.title+' '+p.blocks.map(b=>b.text).join(' ')).toLocaleLowerCase().includes(needle))add(p.icon,p.title,'ページ',p.id);});
+    liveDatabases().forEach(d=>{if(!needle||d.title.toLocaleLowerCase().includes(needle))add('▦',d.title,'データベース','db:'+d.id);});
     liveTasks().forEach(t=>{if(!needle||t.title.toLocaleLowerCase().includes(needle))add('▦',t.title,'タスク · '+t.status,'task:'+t.id);});
     if(!matches){const empty=document.createElement('div');empty.className='empty';empty.textContent='一致する結果がありません。';out.append(empty);}
   }
   function download(filename,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'application/json'}));a.download=filename;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);}
   function exportData(){download('vctrmemo-backup-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({...state,sync:engine.export(),exportedAt:new Date().toISOString()},null,2));toast('変更履歴を含むJSONバックアップを書き出しました。');}
   function mergeRecords(local,remote){const m=new Map(local.map(x=>[x.id,x]));for(const x of remote){if(!x||typeof x.id!=='string')continue;const prev=m.get(x.id);if(!prev||Number(x.updatedAt)>Number(prev.updatedAt))m.set(x.id,structuredClone(x));}return [...m.values()];}
-  function mergeState(received){if(!validate(received))return false;state.pages=mergeRecords(state.pages,received.pages);state.tasks=mergeRecords(state.tasks,received.tasks);state.dbColumns=mergeRecords(state.dbColumns||[],received.dbColumns||[]);persist();render();return true;}
+  function mergeState(received){if(!validate(received))return false;state.pages=mergeRecords(state.pages,received.pages);state.tasks=mergeRecords(state.tasks,received.tasks);state.dbColumns=mergeRecords(state.dbColumns||[],received.dbColumns||[]);state.databases=mergeRecords(state.databases||[],received.databases||[]);persist();render();return true;}
   $('new-page').addEventListener('click',createPage);
   $('search-toggle').addEventListener('click',openSearch);
   $('search-close').addEventListener('click',closeSearch);

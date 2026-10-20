@@ -43,3 +43,14 @@
 .record-description { font-size:16px; margin:0 0 10px; }
 .column-settings { background:transparent; color:var(--teal); border:0; padding:4px; }
 @media(max-width:680px){ .record-fields {grid-template-columns:1fr;} }
+
+
+/* v0.6 — independent databases and inline database blocks */
+.database-block-row{display:flex;flex-wrap:wrap;min-width:0}
+.database-block-row .database-embed-controls{flex:1;min-width:170px}
+.database-block-row .embedded-database{flex:1 0 calc(100% - 60px);min-width:0;margin:4px 0 24px 55px;border:1px solid var(--border);border-radius:10px;padding:14px;background:#161d1e}
+.embedded-database-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.embedded-database .task-table-wrap{max-width:100%}
+.embedded-database .task-table th,.embedded-database .task-table td{padding:9px 10px}
+.db-title-actions{display:flex;gap:8px;margin:12px 0}
+@media(max-width:680px){.database-block-row .embedded-database{margin-left:0;flex-basis:100%;padding:9px}}

@@ -9,8 +9,10 @@
   'use strict';
   const PAGE_FIELDS = ['title','icon','parentId','taskId','deleted','_pos'];
   const BLOCK_FIELDS = ['type','text','targetId','checked','deleted','_pos'];
-  const TASK_FIELDS = ['title','status','priority','due','deleted','_pos'];
-  const COLUMN_FIELDS = ['name','type','deleted','_pos'];
+  const TASK_FIELDS = ['title','status','priority','due','dbId','deleted','_pos'];
+  const COLUMN_FIELDS = ['name','type','dbId','deleted','_pos'];
+  const DATABASE_FIELDS = ['title','icon','deleted','_pos'];
+  const DEFAULT_DATABASE_ID = 'db_default';
   const CELL_FIELDS = ['value'];
   const MAX_OPS = 12000;
   const encode = JSON.stringify;
@@ -39,8 +41,15 @@
     fillInsertedPositions(state.pages);
     fillInsertedPositions(state.tasks);
     if(!Array.isArray(state.dbColumns))state.dbColumns=[];
+    if(!Array.isArray(state.databases))state.databases=[];
+    if(!state.databases.some(d=>d.id===DEFAULT_DATABASE_ID))state.databases.unshift({id:DEFAULT_DATABASE_ID,title:'データベース',icon:'▦',deleted:false});
+    fillInsertedPositions(state.databases);
     fillInsertedPositions(state.dbColumns);
-    for(const t of state.tasks)if(!t.properties || typeof t.properties!=='object' || Array.isArray(t.properties))t.properties={};
+    for(const c of state.dbColumns)if(typeof c.dbId!=='string'||!c.dbId)c.dbId=DEFAULT_DATABASE_ID;
+    for(const t of state.tasks){
+      if(!t.properties || typeof t.properties!=='object' || Array.isArray(t.properties))t.properties={};
+      if(typeof t.dbId!=='string'||!t.dbId)t.dbId=DEFAULT_DATABASE_ID;
+    }
     for(const p of state.pages){
       if(typeof p.taskId!=='string')p.taskId='';
       if(!Array.isArray(p.blocks))p.blocks=[];
@@ -51,6 +60,7 @@
   function flatten(state){
     prepare(state);
     const fields = new Map();
+    for(const d of state.databases)if(typeof d.id==='string')for(const f of DATABASE_FIELDS)fields.set(key('D',d.id,f),d[f]??(f==='deleted'?false:''));
     for(const p of state.pages){
       if(typeof p.id!=='string')continue;
       for(const f of PAGE_FIELDS) fields.set(key('P',p.id,f),p[f]??(f==='deleted'?false:''));
@@ -72,8 +82,8 @@
   function parseKey(k){
     try{
       const p=JSON.parse(k);
-      if(!Array.isArray(p)||!['P','B','T','C','V'].includes(p[0]))return null;
-      const fields=({P:PAGE_FIELDS,B:BLOCK_FIELDS,T:TASK_FIELDS,C:COLUMN_FIELDS,V:CELL_FIELDS})[p[0]];
+      if(!Array.isArray(p)||!['P','B','T','C','V','D'].includes(p[0]))return null;
+      const fields=({P:PAGE_FIELDS,B:BLOCK_FIELDS,T:TASK_FIELDS,C:COLUMN_FIELDS,V:CELL_FIELDS,D:DATABASE_FIELDS})[p[0]];
       if(p.length !== (['B','V'].includes(p[0])?4:3))return null;
       if(!p.slice(1,-1).every(v=>typeof v==='string' && v.length>0 && v.length<=128))return null;
       if(!fields.includes(p.at(-1)))return null;
@@ -90,11 +100,11 @@
     if(typeof v!=='string')return false;
     if(field==='text')return v.length<=30000;
     if(field==='name')return v.length>0&&v.length<=80;
-    if(field==='parentId'||field==='taskId'||field==='targetId')return v.length<=128;
+    if(field==='parentId'||field==='taskId'||field==='targetId'||field==='dbId')return v.length<=128;
     if(field==='value')return v.length<=500;
     if(field==='title')return v.length<=400;
     if(field==='icon')return v.length<=15;
-    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox']:['text','heading','subheading','todo','quote','code','link']).includes(v);
+    if(field==='type')return (parts[0]==='C'?['text','number','date','checkbox']:['text','heading','subheading','todo','quote','code','link','database']).includes(v);
     if(field==='status')return ['未着手','進行中','完了'].includes(v);
     if(field==='priority')return ['低','中','高'].includes(v);
     if(field==='due')return v===''||/^\d{4}-\d\d-\d\d$/.test(v);
@@ -185,7 +195,7 @@
       return true;
     }
     project(){
-      const pages=new Map(),tasks=new Map(),blocks=new Map(),columns=new Map(),cells=[];
+      const pages=new Map(),tasks=new Map(),blocks=new Map(),columns=new Map(),databases=new Map(),cells=[];
       for(const [k,v] of this.values){
         const p=parseKey(k);if(!p)continue;
         if(p[0]==='P'){
@@ -194,6 +204,9 @@
         }else if(p[0]==='T'){
           if(!tasks.has(p[1]))tasks.set(p[1],{id:p[1],title:'無題',status:'未着手',priority:'中',due:'',deleted:false,properties:{},_pos:0,updatedAt:1});
           tasks.get(p[1])[p[2]]=v;
+        }else if(p[0]==='D'){
+          if(!databases.has(p[1]))databases.set(p[1],{id:p[1],title:'データベース',icon:'▦',deleted:false,_pos:0});
+          databases.get(p[1])[p[2]]=v;
         }else if(p[0]==='C'){
           if(!columns.has(p[1]))columns.set(p[1],{id:p[1],name:'列',type:'text',deleted:false,_pos:0});
           columns.get(p[1])[p[2]]=v;
@@ -212,11 +225,14 @@
         const page=pages.get(b.pageId);
         if(page && !b.deleted){const {pageId,...clean}=b;page.blocks.push(clean);}
       }
+      if(!databases.has(DEFAULT_DATABASE_ID))databases.set(DEFAULT_DATABASE_ID,{id:DEFAULT_DATABASE_ID,title:'データベース',icon:'▦',deleted:false,_pos:0});
+      for(const t of tasks.values())if(!t.dbId)t.dbId=DEFAULT_DATABASE_ID;
+      for(const c of columns.values())if(!c.dbId)c.dbId=DEFAULT_DATABASE_ID;
       const sort=(a,b)=>(a._pos||0)-(b._pos||0)||a.id.localeCompare(b.id);
       for(const p of pages.values())p.blocks.sort(sort);
-      return {schema:1,pages:[...pages.values()].sort(sort),tasks:[...tasks.values()].sort(sort),dbColumns:[...columns.values()].sort(sort)};
+      return {schema:1,pages:[...pages.values()].sort(sort),tasks:[...tasks.values()].sort(sort),dbColumns:[...columns.values()].sort(sort),databases:[...databases.values()].sort(sort)};
     }
     export(){return {version:2,actor:this.actor,counter:this.counter,ops:[...this.ops.values()]};}
   }
-  return {Engine,flatten,parseKey,isValidOp};
+  return {Engine,flatten,parseKey,isValidOp,DEFAULT_DATABASE_ID};
 });
