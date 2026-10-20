@@ -63,7 +63,7 @@ with sync_playwright() as p:
         restored=context.new_page()
         boot(restored,stored)
         restored.locator('#pages-list .tree-item').first.click()
-        assert restored.locator('.database-embed-controls select').input_value()!=''
+        assert restored.locator('.database-embed-controls select[aria-label="埋め込みデータベース"]').input_value()!=''
         assert restored.locator('.embedded-database .task-table tbody tr').count()==2
         restored.locator('#pages-list .page-link').filter(has_text='データベース').click()
         assert restored.locator('.task-table tbody tr').count()==4
