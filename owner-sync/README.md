@@ -29,7 +29,7 @@ This implements a genuinely different transport from WebXDC's chat-wide updates:
 
 - [Live relay protocol smoke run](https://github.com/badjoke-lab/vctrmemo/actions/runs/39645799064): real signed, encrypted test event published and decrypted by an independent relay client, passed.
 - [Independent Chromium page-edit run](https://github.com/badjoke-lab/vctrmemo/actions/runs/39646283412): two separate browser storage contexts and public relays; created page on browser A, observed it on B, changed its title on B and observed the change on A, passed.
-- A disconnect/reconnect catch-up test has been added; it is **not considered verified** until its own GitHub Actions run succeeds.
+- [Live browser reconnect run](https://github.com/badjoke-lab/vctrmemo/actions/runs/39646702052): one Chromium instance disconnected, the other edited the page, and the disconnected instance retrieved the missed change after reconnecting, passed.
 - No Vector Mini App device-to-device relay transport, account identity binding or physical Android-to-desktop proof yet.
 
 ## Build and tests
