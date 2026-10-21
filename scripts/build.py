@@ -42,7 +42,7 @@ def build():
         raise ValueError("WebXDC host bridge script was not removed")
     preview = preview.replace('</head>', '  <style>#sync-now{display:none!important}</style>\n</head>', 1)
     # Browser-only: never bundle sync-over-public-relays into the isolated .xdc.
-    preview = preview.replace('</body>', '  <script type="module" src="owner-sync.js"></script>\\n</body>', 1)
+    preview = preview.replace('</body>', '  <script type="module" src="owner-sync.js"></script></body>', 1)
     (SITE / "index.html").write_text(preview, encoding="utf-8")
     for filename in APP_FILES:
         if filename not in ("index.html", "manifest.toml"):
