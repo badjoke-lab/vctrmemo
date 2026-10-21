@@ -1,7 +1,7 @@
 // Encrypted owner sync over Nostr (browser only). Independent of Vector identity.
 import {SimplePool,finalizeEvent,getPublicKey,verifyEvent} from 'nostr-tools';
 import {openWorkspace} from './codec.mjs';
-export const RELAYS=['wss://relay.damus.io','wss://nos.lol'];
+export const RELAYS=['wss://relay.primal.net','wss://relay.ditto.pub','wss://offchain.pub'];
 const KIND=10312; // Regular event kind, not replaceable; one encrypted change/event.
 export async function ownerRelay({secret,relays=RELAYS,pool=new SimplePool(),onOperation=()=>{}}){
   const box=await openWorkspace(secret);
