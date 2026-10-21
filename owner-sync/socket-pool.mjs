@@ -90,9 +90,15 @@ export class SocketPool {
     this.stopped=true;
     this.subscriptions.clear();
     for(const url of urls){
+      const queued=this.acks.get(url);
+      if(queued){for(const a of queued.values()){clearTimeout(a.timer);a.reject(Error('Transport closed'));}queued.clear();}
       const ws=this.connected.get(url);
-      try{ws?.close()}catch{}
+      // ws (Node) can hang for 30 seconds in graceful close. Terminate only
+      // on explicit shutdown; browsers use close().
+      try{if(typeof ws?.terminate==='function')ws.terminate();else ws?.close();}catch{}
       this.connected.delete(url);
+      const opening=this.opening.get(url);
+      if(opening)opening.then(socket=>{try{socket.terminate?.();socket.close?.();}catch{}},()=>{});
     }
   }
 }
