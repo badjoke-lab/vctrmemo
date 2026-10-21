@@ -1,0 +1,23 @@
+name: Experimental live encrypted relay smoke
+on:
+  pull_request:
+    paths:
+      - 'owner-sync/tests/live-relay.mjs'
+      - 'owner-sync/relay.mjs'
+      - '.github/workflows/owner-sync-live.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned Nostr client
+        run: npm install --no-save --no-package-lock nostr-tools@2.23.8 ws@8.18.3
+      - name: Send synthetic ciphertext through public Nostr relay
+        run: timeout 40s node owner-sync/tests/live-relay.mjs
