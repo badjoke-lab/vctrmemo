@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <title>vctrmemo — v0.9 Prototype</title>
+  <title>vctrmemo — v0.10 Prototype</title>
   <link rel="stylesheet" href="styles.css">
   <script src="webxdc.js"></script>
   <script src="sync-core.js" defer></script>
@@ -21,6 +21,13 @@
       <div class="side-bottom">
         <div class="side-bottom-note"><span class="dot"></span><span>端末内に保存</span></div>
         <div class="side-bottom-actions"><button id="export-json" class="subtle-button">⇩ エクスポート</button><button id="import-json" class="subtle-button">⇧ インポート</button></div>
+        <div class="probe-panel">
+          <div class="probe-actions">
+            <button id="probe-send" class="subtle-button" type="button">通信テスト送信</button>
+            <button id="probe-reply" class="subtle-button" type="button" hidden>受信確認を返す</button>
+          </div>
+          <div class="probe-status" id="probe-status" role="status" aria-live="polite">Vector内での通信確認は未実施</div>
+        </div>
         <input type="file" id="import-file" accept=".json,application/json" hidden>
       </div>
     </aside>

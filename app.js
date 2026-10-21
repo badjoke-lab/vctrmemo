@@ -702,11 +702,49 @@
   $('conflict-backdrop').addEventListener('click',e=>{if(e.target===$('conflict-backdrop'))e.target.classList.add('hidden');});
   const host=window.webxdc;
   let transfer=null;
+  const probe=new VctrTransfer.Probe(uid());
+  function setProbeStatus(message){
+    const status=$('probe-status');
+    if(status)status.textContent=message;
+    $('probe-reply').hidden=!probe.hasRequest;
+  }
+  function sendProbe(update){
+    if(!host||typeof host.sendUpdate!=='function'){
+      setProbeStatus('Web版では通信できません。Vectorのチャットで開いてください。');
+      return false;
+    }
+    if(transfer?.active){
+      setProbeStatus('変更履歴の送信が終わってから通信テストを実行してください。');
+      return false;
+    }
+    try{host.sendUpdate(update,'');return true;}
+    catch(err){console.warn('vctrmemo connectivity probe failed',err);setProbeStatus('送信に失敗しました。もう一度試してください。');return false;}
+  }
+  $('probe-send').addEventListener('click',()=>{
+    if(!host||typeof host.sendUpdate!=='function'){
+      setProbeStatus('Web版では通信できません。Vectorのチャットで開いてください。');return;
+    }
+    if(transfer?.active){setProbeStatus('共有処理の完了後に実行してください。');return;}
+    const request=probe.start(uid());
+    if(sendProbe(request))setProbeStatus('テスト送信済み。相手が「受信確認を返す」を押すとここに表示されます。');
+  });
+  $('probe-reply').addEventListener('click',()=>{
+    if(transfer?.active){setProbeStatus('共有処理の完了後に応答してください。');return;}
+    const ack=probe.response();
+    if(!ack)return;
+    if(sendProbe(ack))setProbeStatus('受信確認を送信しました。相手の画面で応答を確認してください。');
+  });
   if(host&&typeof host.setUpdateListener==='function'&&typeof host.sendUpdate==='function'){
     document.body.classList.add('vector-host');
     try{
       const replay=host.setUpdateListener(update=>{
         const payload=update?.payload;
+        if(payload?.kind===VctrTransfer.PROBE_KIND){
+          const event=probe.accept(payload);
+          if(event?.kind==='request')setProbeStatus('通信テストを受信しました。「受信確認を返す」を押してください。');
+          if(event?.kind==='ack')setProbeStatus('別のアプリ実行環境から受信確認: '+event.count+'件（相手側で受信）');
+          return;
+        }
         if(payload?.kind==='workspace-snapshot-v1')return; // Old format is not causally safe.
         if(payload?.kind!=='vctrmemo-ops-v2'||!Array.isArray(payload.ops)||payload.ops.length>12000)return;
         const receipt=transferTracker.accept(payload);

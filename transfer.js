@@ -126,5 +126,50 @@
       return last?{id:last.id,received:last.parts.size,total:last.total,complete:last.parts.size===last.total}:null;
     }
   }
-  return {KIND,batches,trackedBatches,Tracker,Sender,bytes};
+  // This is a manual connectivity receipt, not a cryptographic peer identity proof.
+  // Each app opening gets a fresh client ID, separate from any imported sync actor.
+  const PROBE_KIND='vctrmemo-probe-v1';
+  function Probe(clientId){
+    const safeId=v=>typeof v==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(v);
+    if(!safeId(clientId))throw Error('通信テストのIDが不正です。');
+    let waiting=null,received=null;
+    const acknowledgements=new Set();
+    const wrapProbe=(action,requestId)=>({
+      payload:{kind:PROBE_KIND,action,requestId,clientId},
+      summary:action==='request'?'通信テスト':'受信を確認'
+    });
+    return {
+      start(id){
+        if(!safeId(id))throw Error('通信テストのIDが不正です。');
+        waiting=id;acknowledgements.clear();
+        return wrapProbe('request',id);
+      },
+      accept(payload){
+        if(!payload || payload.kind!==PROBE_KIND)return null;
+        if(!safeId(payload.clientId)||!safeId(payload.requestId) ||
+           !['request','ack'].includes(payload.action))return {kind:'invalid'};
+        // The host normally delivers our own update too; it must NOT count.
+        if(payload.clientId===clientId)return {kind:'self'};
+        if(payload.action==='request'){
+          received={requestId:payload.requestId,clientId:payload.clientId};
+          return {kind:'request'};
+        }
+        if(payload.requestId!==waiting)return {kind:'unrelated'};
+        const before=acknowledgements.size;
+        acknowledgements.add(payload.clientId);
+        return {kind:'ack',count:acknowledgements.size,duplicate:before===acknowledgements.size};
+      },
+      response(){
+        if(!received)return null;
+        const update=wrapProbe('ack',received.requestId);
+        received=null;
+        return update;
+      },
+      get pending(){return waiting!==null;},
+      get responses(){return acknowledgements.size;},
+      get hasRequest(){return received!==null;},
+      get clientId(){return clientId;}
+    };
+  }
+  return {KIND,PROBE_KIND,batches,trackedBatches,Tracker,Sender,Probe,bytes};
 });

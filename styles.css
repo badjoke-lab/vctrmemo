@@ -76,3 +76,10 @@
 .sync-state{color:#8da99c;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sync-state:has(+ #show-conflicts){flex-shrink:1}
 @media(max-width:720px){.sync-state{font-size:10px;max-width:112px}.top-actions{gap:5px}}
+
+/* v0.10 manual Vector end-to-end transport smoke test */
+.probe-panel{padding:10px 2px 2px;border-top:1px solid var(--border);margin-top:9px}
+.probe-actions{display:flex;flex-wrap:wrap;gap:7px}
+.probe-actions button{font-size:11px;padding:7px 9px}
+.probe-status{font-size:11px;line-height:1.45;color:#a9c6bb;margin-top:7px;overflow-wrap:anywhere}
+#probe-reply[hidden]{display:none!important}
