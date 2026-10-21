@@ -25,7 +25,7 @@ def boot(page):
     page.add_style_tag(content=(ROOT/'styles.css').read_text())
     for filename in ('sync-core.js','transfer.js','app.js'):
         page.add_script_tag(content=(ROOT/filename).read_text())
-    page.locator('#probe-send').wait_for()
+    page.locator('#probe-send').wait_for(state='attached')
     assert page.evaluate("window.__listenerCount")==1
 
 with sync_playwright() as p:
@@ -35,6 +35,8 @@ with sync_playwright() as p:
         c2=browser.new_context(viewport={'width':1280,'height':920})
         a=c1.new_page();b=c2.new_page()
         boot(a);boot(b)
+        a.locator('.probe-panel summary').click()
+        b.locator('.probe-panel summary').click()
         a.locator('#probe-send').click()
         request=a.evaluate("window.__wire[0]")
         assert request['payload']['kind']=='vctrmemo-probe-v1'

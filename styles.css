@@ -83,3 +83,14 @@
 .probe-actions button{font-size:11px;padding:7px 9px}
 .probe-status{font-size:11px;line-height:1.45;color:#a9c6bb;margin-top:7px;overflow-wrap:anywhere}
 #probe-reply[hidden]{display:none!important}
+
+/* v0.11 personal-first. Chat collaboration is opt-in, not the default. */
+.privacy-panel{border-top:1px solid var(--border);padding:12px 3px 10px;margin-top:8px;font-size:11px;color:#b2c6b8}
+.privacy-panel strong{display:block;font-weight:650;color:#d3e5db;margin-bottom:4px}
+.privacy-panel p{font-size:11px;line-height:1.5;margin:4px 0 8px}
+.share-optin{display:flex;align-items:flex-start;gap:7px;line-height:1.45;cursor:pointer}
+.share-optin input{margin-top:2px;flex-shrink:0}
+.privacy-warning{color:#caa789}
+.probe-panel summary{cursor:pointer;color:#a9c6bb;font-size:11px;padding:6px 0;list-style:disclosure-closed}
+.probe-panel[open] summary{list-style:disclosure-open}
+#sync-now[hidden]{display:none!important}

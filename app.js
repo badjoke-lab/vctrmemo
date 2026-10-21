@@ -55,6 +55,9 @@
   }catch(err){console.error('vctrmemo storage issue',err);state=defaults();engine=VctrSync.Engine.fromState(state);}
   let baseline = structuredClone(state);
   let incomingQueue = [];
+  // Personal/local is the default. Incoming chat ops are quarantined until opt-in.
+  let chatSharingEnabled=false;
+  const quarantined=new VctrSync.Engine([],'quarantine');
   const transferTracker=new VctrTransfer.Tracker();
   let replayFinished=false;
   let view = 'home';
@@ -104,6 +107,7 @@
   }
   function updateSyncState(){
     const node=$('sync-state');if(!node)return;
+    if(!chatSharingEnabled){node.textContent='● 個人用・共有オフ';node.title='この端末での個人利用。自動的な他端末同期は未実装です。';return;}
     const missing=engine.missingPredecessors().length;
     const pending=transferTracker.pending();
     const latest=transferTracker.latest();
@@ -167,7 +171,7 @@
     return !!a && (a.isContentEditable || (a.tagName==='INPUT' && a.id!=='search-input') || a.tagName==='TEXTAREA');
   }
   function flushIncoming(){
-    if(!incomingQueue.length || isEditing())return;
+    if(!chatSharingEnabled || !incomingQueue.length || isEditing())return;
     const list=incomingQueue;incomingQueue=[];
     let added=0;
     for(const ops of list)added+=engine.merge(ops);
@@ -702,6 +706,32 @@
   $('conflict-backdrop').addEventListener('click',e=>{if(e.target===$('conflict-backdrop'))e.target.classList.add('hidden');});
   const host=window.webxdc;
   let transfer=null;
+  const shareOptIn=$('share-optin');
+  $('sync-now').hidden=true;
+  shareOptIn.checked=false;
+  shareOptIn.addEventListener('change',()=>{
+    if(shareOptIn.checked){
+      if(!host||typeof host.sendUpdate!=='function'){
+        shareOptIn.checked=false;toast('ブラウザ版ではVectorチャット共有を利用できません。');return;
+      }
+      const note='共同編集を有効にすると、このチャットで受信した変更履歴を個人データに取り込みます。共有ボタンを押すと自分の全ページ・レコードの変更履歴がチャットの全参加者に渡ります。個人利用だけなら有効にしないでください。有効にしますか？';
+      if(!confirm(note)){shareOptIn.checked=false;return;}
+      chatSharingEnabled=true;
+      $('sync-now').hidden=false;
+      const buffered=quarantined.export().ops;
+      if(buffered.length)incomingQueue.push(buffered);
+      shareOptIn.blur();
+      flushIncoming();
+      toast('チャット共同編集モードを有効にしました。共有相手に注意してください。');
+    }else{
+      if(transfer?.active){shareOptIn.checked=true;toast('送信中は共同編集モードを終了できません。');return;}
+      chatSharingEnabled=false;
+      $('sync-now').hidden=true;
+      incomingQueue=[];
+      toast('個人モードに戻しました。共有済みデータは取り消せません。');
+    }
+    updateSyncState();
+  });
   const probe=new VctrTransfer.Probe(uid());
   function setProbeStatus(message){
     const status=$('probe-status');
@@ -749,6 +779,11 @@
         if(payload?.kind!=='vctrmemo-ops-v2'||!Array.isArray(payload.ops)||payload.ops.length>12000)return;
         const receipt=transferTracker.accept(payload);
         if(receipt?.invalid){console.warn('Rejected inconsistent transfer metadata');return;}
+        if(!chatSharingEnabled){
+          quarantined.merge(payload.ops);
+          updateSyncState();
+          return;
+        }
         incomingQueue.push(payload.ops);
         flushIncoming();
         updateSyncState();
@@ -759,6 +794,7 @@
     }catch(err){console.warn('WebXDC listener error',err);}
   }
   $('sync-now').addEventListener('click',()=>{
+    if(!chatSharingEnabled){toast('個人用のため共有はオフです。');return;}
     if(!host||typeof host.sendUpdate!=='function'){toast('ブラウザ版では同期できません。Vector内で開いてください。');return;}
     if(transfer?.active){toast('現在、分割送信中です。完了するまで操作しないでください。');return;}
     flushIncoming();
@@ -773,11 +809,11 @@
     transfer=new VctrTransfer.Sender(host,{onStatus:({kind,done,total,error})=>{
       if(kind==='sent')syncBtn.textContent='送信 '+done+'/'+total;
       if(kind==='finished'){
-        syncBtn.disabled=false;syncBtn.textContent='↗ 変更を共有';
+        syncBtn.disabled=false;syncBtn.textContent='↗ チャットへ共有';
         toast('WebXDCへ '+total+' 件の送信を呼び出しました。相手の受信確認ではありません。');
       }
       if(kind==='failed'||kind==='stopped'){
-        syncBtn.disabled=false;syncBtn.textContent='↗ 変更を共有';
+        syncBtn.disabled=false;syncBtn.textContent='↗ チャットへ共有';
         toast('送信は '+done+'/'+total+' 件で停止しました。再度「変更を共有」を押すと全履歴を再送できます。');
         if(error)console.error('vctrmemo transfer error',error);
       }

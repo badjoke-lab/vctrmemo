@@ -43,7 +43,9 @@ with sync_playwright() as playwright:
         receiver=ctx.new_page()
         boot(sender,True)
         boot(receiver,False)
-        assert 'Vector' in sender.locator('#sync-state').inner_text()
+        assert '個人用・共有オフ' in sender.locator('#sync-state').inner_text()
+        sender.locator('#share-optin').check()
+        receiver.locator('#share-optin').check()
         def send_all():
             sender.evaluate("window.__wire=[]")
             sender.locator('#sync-now').click()
