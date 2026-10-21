@@ -17,7 +17,7 @@
     pages:[
       {id:'welcome',title:'はじめに',icon:'✦',updatedAt:1,deleted:false,blocks:[
         {id:'w1',type:'heading',text:'自分の情報は、自分の手元に。',checked:false},
-        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.8 では逆参照、件数と数値合計の集計、データベースのアーカイブと復元ができます。',checked:false},
+        {id:'w2',type:'text',text:'vctrmemo は、ページやタスクを端末内で管理できるメモアプリの試作品です。v0.9 では、Vectorで共有した分割履歴の受信状況と不足を確認できます。',checked:false},
         {id:'w3',type:'subheading',text:'できること',checked:false},
         {id:'w4',type:'todo',text:'ページを新規作成・編集する',checked:false},
         {id:'w5',type:'todo',text:'タスクをテーブル・カンバンで管理する',checked:false},
@@ -55,6 +55,8 @@
   }catch(err){console.error('vctrmemo storage issue',err);state=defaults();engine=VctrSync.Engine.fromState(state);}
   let baseline = structuredClone(state);
   let incomingQueue = [];
+  const transferTracker=new VctrTransfer.Tracker();
+  let replayFinished=false;
   let view = 'home';
   let dbMode = 'table';
   let filterField = 'all', filterQuery = '', sortField = 'none', sortDirection = 'asc';
@@ -97,7 +99,35 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify({sync:engine.export()}));
       $('save-state').textContent='● 端末保存済み';
       updateConflictButton();
+      updateSyncState();
     } catch(e) { $('save-state').textContent='● 保存エラー';toast('端末への保存に失敗しました。JSONを書き出してください。'); console.error(e); }
+  }
+  function updateSyncState(){
+    const node=$('sync-state');if(!node)return;
+    const missing=engine.missingPredecessors().length;
+    const pending=transferTracker.pending();
+    const latest=transferTracker.latest();
+    if(missing){
+      node.textContent='⚠ 履歴不足 '+missing;
+      node.title='この端末の履歴に参照先が届いていない変更があります。送信元で変更を再共有してください。';
+      return;
+    }
+    if(pending.length){
+      const lost=pending.reduce((n,t)=>n+t.missing,0);
+      node.textContent='⚠ 未受信 '+lost+'分割';
+      node.title='この端末では分割メッセージの一部が未受信です。送信元に「変更を共有」を再実行してもらってください。';
+      return;
+    }
+    if(latest?.complete){
+      node.textContent='● この端末で分割受信完了';
+      node.title='この端末が認識した直近転送の全分割を取得しました。他の端末への到達確認ではありません。';
+    }else if(window.webxdc?.setUpdateListener){
+      node.textContent=replayFinished?'● Vector受信待機':'○ Vector履歴を読込中';
+      node.title='履歴の再生状況です。通信到達・暗号化保存の保証ではありません。';
+    }else{
+      node.textContent='○ Web版（共有なし）';
+      node.title='ブラウザ版ではVectorの送受信を利用できません。';
+    }
   }
   function updateConflictButton(){
     const node=$('show-conflicts');
@@ -142,6 +172,7 @@
     let added=0;
     for(const ops of list)added+=engine.merge(ops);
     if(added){state=engine.project();baseline=structuredClone(state);persist(true);render();toast('共有された変更を取り込みました。');}
+    updateSyncState();
   }
   document.addEventListener('focusout',()=>setTimeout(flushIncoming,0));
   function touchPage(p) { p.updatedAt=stamp();persist(); }
@@ -674,13 +705,19 @@
   if(host&&typeof host.setUpdateListener==='function'&&typeof host.sendUpdate==='function'){
     document.body.classList.add('vector-host');
     try{
-      host.setUpdateListener(update=>{
+      const replay=host.setUpdateListener(update=>{
         const payload=update?.payload;
         if(payload?.kind==='workspace-snapshot-v1')return; // Old format is not causally safe.
         if(payload?.kind!=='vctrmemo-ops-v2'||!Array.isArray(payload.ops)||payload.ops.length>12000)return;
+        const receipt=transferTracker.accept(payload);
+        if(receipt?.invalid){console.warn('Rejected inconsistent transfer metadata');return;}
         incomingQueue.push(payload.ops);
         flushIncoming();
+        updateSyncState();
       },0);
+      if(replay&&typeof replay.then==='function')replay.then(()=>{
+        replayFinished=true;updateSyncState();
+      }).catch(err=>{console.warn('WebXDC replay error',err);updateSyncState();});
     }catch(err){console.warn('WebXDC listener error',err);}
   }
   $('sync-now').addEventListener('click',()=>{
@@ -689,7 +726,7 @@
     flushIncoming();
     const maxSize=Number(host.sendUpdateMaxSize)>0 ? Number(host.sendUpdateMaxSize) : 128000;
     let parts;
-    try { parts=VctrTransfer.batches(engine.export().ops,maxSize); }
+    try { parts=VctrTransfer.trackedBatches(engine.export().ops,maxSize,uid(),engine.actor); }
     catch(err){toast('共有できません: '+err.message);return;}
     if(!parts.length){toast('共有する変更履歴がありません。');return;}
     if(!confirm('このチャットの参加者にページ・タスクの変更履歴を '+parts.length+' 件に分けて送信します。すべての内容が共有されます。送信しますか？'))return;
@@ -709,5 +746,5 @@
     }});
     transfer.start(parts);
   });
-  persist(true);render();
+  persist(true);render();updateSyncState();
 })();

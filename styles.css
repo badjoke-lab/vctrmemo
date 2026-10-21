@@ -71,3 +71,8 @@
 .derived-link:hover{background:#2e4c43}
 .record-references{border:1px solid var(--border);padding:14px;border-radius:10px;margin:16px 0}
 .record-references h3{font-size:13px;font-weight:600;margin:0 0 9px}
+
+/* v0.9 local transfer integrity indicator (not an end-to-end receipt) */
+.sync-state{color:#8da99c;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sync-state:has(+ #show-conflicts){flex-shrink:1}
+@media(max-width:720px){.sync-state{font-size:10px;max-width:112px}.top-actions{gap:5px}}

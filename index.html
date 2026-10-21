@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <title>vctrmemo — v0.8 Prototype</title>
+  <title>vctrmemo — v0.9 Prototype</title>
   <link rel="stylesheet" href="styles.css">
   <script src="webxdc.js"></script>
   <script src="sync-core.js" defer></script>
@@ -26,7 +26,7 @@
     </aside>
     <div class="mobile-shade" id="mobile-shade"></div>
     <main class="main">
-      <header class="topbar"><div class="crumb"><button class="icon-button mobile-only" id="open-sidebar" aria-label="メニューを開く">☰</button><span class="faint">vctrmemo</span><span class="slash">/</span><strong id="crumb-page">Overview</strong></div><div class="top-actions"><span class="save-state" id="save-state">● 保存済み</span><button id="show-conflicts" class="outline-button" hidden>⚠ 競合</button><button id="sync-now" class="outline-button" title="Vectorチャットに変更履歴を手動共有">↗ 変更を共有</button></div></header>
+      <header class="topbar"><div class="crumb"><button class="icon-button mobile-only" id="open-sidebar" aria-label="メニューを開く">☰</button><span class="faint">vctrmemo</span><span class="slash">/</span><strong id="crumb-page">Overview</strong></div><div class="top-actions"><span class="save-state" id="save-state">● 保存済み</span><span id="sync-state" class="sync-state" title="同期状態">○ Web版（共有なし）</span><button id="show-conflicts" class="outline-button" hidden>⚠ 競合</button><button id="sync-now" class="outline-button" title="Vectorチャットに変更履歴を手動共有">↗ 変更を共有</button></div></header>
       <div id="content-area" class="content-area"></div>
     </main>
   </div>

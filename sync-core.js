@@ -243,6 +243,13 @@
       for(const p of pages.values())p.blocks.sort(sort);
       return {schema:1,pages:[...pages.values()].sort(sort),tasks:[...tasks.values()].sort(sort),dbColumns:[...columns.values()].sort(sort),databases:[...databases.values()].sort(sort)};
     }
+    missingPredecessors(){
+      const missing=new Set();
+      for(const op of this.ops.values())for(const id of op.pred||[]){
+        if(!this.ops.has(id))missing.add(id);
+      }
+      return [...missing].sort();
+    }
     export(){return {version:2,actor:this.actor,counter:this.counter,ops:[...this.ops.values()]};}
   }
   // Computed backlinks never copy or mutate source cells; they derive from the

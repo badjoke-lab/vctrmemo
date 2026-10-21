@@ -33,6 +33,7 @@ jobs:
           node tests/test-v06.cjs
           node tests/test-v07.cjs
           node tests/test-v08.cjs
+          node tests/test-v09.cjs
       - name: Install browser test requirements
         run: |
           python -m pip install playwright
@@ -45,6 +46,7 @@ jobs:
           python tests/test-v06-browser.py
           python tests/test-v07-browser.py
           python tests/test-v08-browser.py
+          python tests/test-v09-browser.py
       - name: Build WebXDC and Pages preview
         run: python scripts/build.py
       - name: Verify bundle and preview
