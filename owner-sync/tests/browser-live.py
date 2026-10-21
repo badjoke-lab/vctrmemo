@@ -42,7 +42,22 @@ with sync_playwright() as p:
         b.locator('#doc-title').blur()
         a.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('B端末で更新した試験ページ')""",timeout=90000)
         assert 'B端末で更新した試験ページ' in a.locator('#pages-list').inner_text()
-        print('owner sync LIVE BROWSER: two independent Chromium contexts, signed E2EE relay, A→B and B→A page changes PASS')
+        # B disconnects from the relay: its local workspace remains usable.
+        if not b.locator('#owner-disconnect').is_visible():
+            b.locator('#owner-sync-panel summary').click()
+        b.locator('#owner-disconnect').click()
+        assert '同期を停止' in b.locator('#owner-sync-state').inner_text()
+        a.locator('#pages-list').get_by_text('B端末で更新した試験ページ').click()
+        a.locator('#doc-title').fill('AがB切断中に更新')
+        a.locator('#doc-title').blur()
+        assert 'AがB切断中に更新' in a.locator('#pages-list').inner_text()
+        assert 'AがB切断中に更新' not in b.locator('#pages-list').inner_text()
+        # Reconnect B with the same previously paired key; catch up from relay history.
+        b.locator('#owner-sync-secret').fill(secret)
+        b.locator('#owner-connect').click()
+        b.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('AがB切断中に更新')""",timeout=90000)
+        assert 'AがB切断中に更新' in b.locator('#pages-list').inner_text()
+        print('owner sync LIVE BROWSER: independent Chromium A→B, B→A, and disconnect/reconnect catchup PASS')
         a.close();b.close();first_ctx.close();second_ctx.close()
     finally:
         browser.close()
