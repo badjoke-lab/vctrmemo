@@ -1,0 +1,29 @@
+name: Audit Vector Mini App host capabilities
+on:
+  pull_request:
+    paths:
+      - "scripts/audit-vector-host.mjs"
+      - "docs/VECTOR_PERSONAL_SYNC_FEASIBILITY.md"
+      - ".github/workflows/vector-host-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check audit script syntax
+        run: node --check scripts/audit-vector-host.mjs
+      - name: Audit pinned official Vector source
+        run: node scripts/audit-vector-host.mjs > vector-host-audit.json
+      - name: Print audit summary
+        run: cat vector-host-audit.json
+      - name: Attach machine-readable evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: vector-host-audit
+          path: vector-host-audit.json
