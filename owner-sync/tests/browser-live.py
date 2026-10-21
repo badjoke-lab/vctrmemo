@@ -7,10 +7,10 @@ ROOT=Path(__file__).resolve().parents[2]
 BASE='http://127.0.0.1:18767/'
 def context(browser,actor):
     ctx=browser.new_context(viewport={'width':1200,'height':900})
-    ctx.add_init_script(f"""() => {{
+    ctx.add_init_script(f"""(function() {{
       if(!localStorage.getItem('vctrmemo-v2'))
         localStorage.setItem('vctrmemo-v2',JSON.stringify({{sync:{{version:2,actor:'{actor}',counter:0,ops:[]}}}}));
-    }}""")
+    }})();""")
     return ctx
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True,args=['--no-sandbox'])
