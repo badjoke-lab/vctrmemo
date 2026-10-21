@@ -35,6 +35,12 @@ jobs:
           node tests/test-v08.cjs
           node tests/test-v09.cjs
           node tests/test-v010.cjs
+      - name: Install browser-only encrypted sync dependencies
+        run: npm install --no-save --no-package-lock nostr-tools@2.23.8 esbuild@0.25.12
+      - name: Encrypted owner sync unit and two-client relay tests
+        run: |
+          node --test owner-sync/tests/codec.test.mjs
+          node --test owner-sync/tests/relay.test.mjs
       - name: Install browser test requirements
         run: |
           python -m pip install playwright
@@ -53,6 +59,10 @@ jobs:
           python tests/test-v012-browser.py
       - name: Build WebXDC and Pages preview
         run: python scripts/build.py
+      - name: Bundle browser-only owner sync module
+        run: ./node_modules/.bin/esbuild owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=dist/site/owner-sync.js
+      - name: Verify owner sync stays out of WebXDC
+        run: python owner-sync/tests/package.test.py
       - name: Verify bundle and preview
         run: python tests/test-package.py
       - name: Upload tested WebXDC (no source ZIP)
