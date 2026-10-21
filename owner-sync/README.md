@@ -25,6 +25,13 @@ This implements a genuinely different transport from WebXDC's chat-wide updates:
 - The Vector .xdc is **not changed** by this browser-only script. Vector's Mini App sandbox blocks direct external relay connections, so this does NOT complete Vector's own automatic 2-device sync.
 - Previously stored local workspaces are not migrated or deleted; the original `vctrmemo-v2` key and JSON import/export are preserved.
 
+## Observed results (2026-10-22)
+
+- [Live relay protocol smoke run](https://github.com/badjoke-lab/vctrmemo/actions/runs/39645799064): real signed, encrypted test event published and decrypted by an independent relay client, passed.
+- [Independent Chromium page-edit run](https://github.com/badjoke-lab/vctrmemo/actions/runs/39646283412): two separate browser storage contexts and public relays; created page on browser A, observed it on B, changed its title on B and observed the change on A, passed.
+- A disconnect/reconnect catch-up test has been added; it is **not considered verified** until its own GitHub Actions run succeeds.
+- No Vector Mini App device-to-device relay transport, account identity binding or physical Android-to-desktop proof yet.
+
 ## Build and tests
 
 The GitHub Actions PR workflow installs a pinned version of `nostr-tools` and `esbuild`, executes encryption unit tests and two-instance relay **mock** tests, and bundles `dist/site/owner-sync.js` only in the browser preview. It also verifies that `dist/vctrmemo.xdc` contains no owner-sync script.
