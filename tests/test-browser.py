@@ -28,6 +28,8 @@ with sync_playwright() as p:
             page.locator('.metric-strip').wait_for(timeout=10000)
             return ctx,page
         ac,a=client();bc,b=client()
+        a.locator('#share-optin').check()
+        b.locator('#share-optin').check()
         a.locator('#new-page').click()
         a.locator('#doc-title').fill('転送統合テスト 🌸')
         a.locator('#sync-now').click()
