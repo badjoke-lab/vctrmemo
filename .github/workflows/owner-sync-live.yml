@@ -21,5 +21,7 @@ jobs:
         run: npm install --no-save --no-package-lock nostr-tools@2.23.8 ws@8.18.3
       - name: Diagnose public relay WebSocket connectivity
         run: node owner-sync/tests/probe-network.mjs
+      - name: Probe signed NIP-01 event delivery and relay responses
+        run: node owner-sync/tests/probe-event.mjs
       - name: Send synthetic ciphertext through public Nostr relay
         run: timeout 40s node owner-sync/tests/live-relay.mjs
