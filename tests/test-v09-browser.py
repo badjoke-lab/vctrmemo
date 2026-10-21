@@ -44,40 +44,25 @@ with sync_playwright() as playwright:
         boot(sender,True)
         boot(receiver,False)
         assert '個人用・共有オフ' in sender.locator('#sync-state').inner_text()
-        sender.locator('#share-optin').check()
-        receiver.locator('#share-optin').check()
-        def send_all():
-            sender.evaluate("window.__wire=[]")
-            sender.locator('#sync-now').click()
-            sender.wait_for_function("document.querySelector('#sync-now').disabled===false", timeout=20000)
-            return sender.evaluate("window.__wire")
-        wire=send_all()
-        assert len(wire)>5
-        assert all(x['payload']['kind']=='vctrmemo-ops-v2' for x in wire)
-        assert all('transfer' in x['payload'] for x in wire)
-        # Do not infer gaps from WebXDC serials: the protocol permits gaps.
-        deliver=lambda msg,serial: receiver.evaluate("""args => window.__listener({
-            payload:args[0].payload,serial:args[1],max_serial:args[1]+100
-        })""",[msg,serial])
-        missed=3
-        for i in reversed(range(len(wire))):
-            if i!=missed: deliver(wire[i],100+i*9)
-        deliver(wire[0],100)
-        assert '未受信 1分割' in receiver.locator('#sync-state').inner_text()
-        # A complete whole-history resend with another transferId recovers gaps.
-        retry=send_all()
-        assert retry[0]['payload']['transfer']['id']!=wire[0]['payload']['transfer']['id']
-        for i in reversed(range(len(retry))):deliver(retry[i],3000+i*13)
-        assert '分割受信完了' in receiver.locator('#sync-state').inner_text()
-        assert receiver.evaluate("""() => {
+        assert sender.locator('#share-optin').is_disabled()
+        assert sender.locator('#sync-now').is_visible() is False
+        # WebXDC update replays are quarantined: no chat data enters solo mode.
+        before=receiver.evaluate("localStorage.getItem('vctrmemo-v2')")
+        wire=sender.evaluate("""() => {
           const data=JSON.parse(localStorage.getItem('vctrmemo-v2'));
-          const engine=new VctrSync.Engine(data.sync.ops,data.sync.actor,data.sync.counter);
-          return engine.missingPredecessors().length===0 && 
-            engine.project().pages.find(p=>p.id==='p1').blocks.length===25;
+          return VctrTransfer.trackedBatches(data.sync.ops,1800,'test_transfer','senderA');
         }""")
-        assert receiver.evaluate("window.__listeners")==1
+        assert len(wire)>5
+        for i in reversed(range(len(wire))):
+            receiver.evaluate("""args=>window.__listener({
+              payload:args[0].payload,serial:args[1],max_serial:args[1]+100
+            })""",[wire[i],100+i*17])
+        assert receiver.evaluate("localStorage.getItem('vctrmemo-v2')")==before
+        assert receiver.evaluate("window.__wire.length")==0
+        assert sender.evaluate("window.__wire.length")==0
         assert sender.evaluate("window.__listeners")==1
-        print('vctrmemo v0.9 WebXDC mock: multi-client, serial gaps, missing chunk, duplicate, full resend, local persistence PASS')
+        assert receiver.evaluate("window.__listeners")==1
+        print('vctrmemo v0.9 transport remains testable while legacy chat auto-import is disabled PASS')
         ctx.close()
     finally:
         browser.close()

@@ -35,3 +35,7 @@ vctrmemo is a Notion-style personal-first workspace for pages, blocks, structure
 - https://webxdc.org/docs/shared_state/conflicts.html
 - https://webxdc.org/docs/faq/storage.html
 - https://webxdc.org/docs/spec/sendUpdate.html
+
+## v0.12 safety restriction
+
+While owner-only multi-device sync and truly separate shared workspace permissions are unresolved, all chat-wide workspace updates are rejected and the app's chat-history sharing action is disabled, not merely hidden. Diagnostic probe messages contain no page or database data. The v0.11 toggle and chat-history merging are deprecated and disabled. Existing local keys, stored operations and backup formats are retained without automatic deletion or migration. See the draft usage-mode proposal in PR #1; it is not yet an approved final spec.

@@ -50,6 +50,7 @@ jobs:
           python tests/test-v09-browser.py
           python tests/test-v010-browser.py
           python tests/test-v011-browser.py
+          python tests/test-v012-browser.py
       - name: Build WebXDC and Pages preview
         run: python scripts/build.py
       - name: Verify bundle and preview

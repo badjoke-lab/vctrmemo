@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
-  <title>vctrmemo — v0.11 Prototype</title>
+  <title>vctrmemo — v0.12 Prototype</title>
   <link rel="stylesheet" href="styles.css">
   <script src="webxdc.js"></script>
   <script src="sync-core.js" defer></script>
@@ -23,9 +23,9 @@
         <div class="side-bottom-actions"><button id="export-json" class="subtle-button">⇩ エクスポート</button><button id="import-json" class="subtle-button">⇧ インポート</button></div>
         <div class="privacy-panel">
           <strong>個人ワークスペース</strong>
-          <p>この端末に保存します。他の利用者との共有は初期状態でオフです。</p>
-          <label class="share-optin"><input id="share-optin" type="checkbox"> このチャットでの共同編集を有効にする（任意）</label>
-          <p class="privacy-warning">共有を有効にして「チャットへ共有」を押すと、全ページ・レコードの変更履歴がチャット参加者に渡ります。</p>
+          <p>この端末で1人で使えます。現在は個人用のローカル保存のみです。2端末同期は未実装です。</p>
+          <label class="share-optin"><input id="share-optin" type="checkbox" disabled> 複数人共有：仕様検討中（利用不可）</label>
+          <p class="privacy-warning">過去のバージョンで共有した内容の回収はできません。現在のバージョンはページ・データベースをチャットへ送信しません。</p>
         </div>
         <details class="probe-panel"><summary>通信診断（任意・開発用）</summary>
           <div class="probe-actions">
@@ -39,7 +39,7 @@
     </aside>
     <div class="mobile-shade" id="mobile-shade"></div>
     <main class="main">
-      <header class="topbar"><div class="crumb"><button class="icon-button mobile-only" id="open-sidebar" aria-label="メニューを開く">☰</button><span class="faint">vctrmemo</span><span class="slash">/</span><strong id="crumb-page">Overview</strong></div><div class="top-actions"><span class="save-state" id="save-state">● 保存済み</span><span id="sync-state" class="sync-state" title="同期状態">● 個人用・共有オフ</span><button id="show-conflicts" class="outline-button" hidden>⚠ 競合</button><button id="sync-now" class="outline-button" title="このチャットの全員に変更履歴を渡します" hidden>↗ チャットへ共有</button></div></header>
+      <header class="topbar"><div class="crumb"><button class="icon-button mobile-only" id="open-sidebar" aria-label="メニューを開く">☰</button><span class="faint">vctrmemo</span><span class="slash">/</span><strong id="crumb-page">Overview</strong></div><div class="top-actions"><span class="save-state" id="save-state">● 保存済み</span><span id="sync-state" class="sync-state" title="同期状態">● 個人用・共有オフ</span><button id="show-conflicts" class="outline-button" hidden>⚠ 競合</button><button id="sync-now" class="outline-button" title="複数人共有は未実装です" disabled hidden>↗ チャットへ共有（利用不可）</button></div></header>
       <div id="content-area" class="content-area"></div>
     </main>
   </div>

@@ -42,25 +42,20 @@ with sync_playwright() as p:
         }""")
         assert page.evaluate("localStorage.getItem('vctrmemo-v2')")==before
         assert page.locator('#pages-list .tree-item').filter(has_text='他の参加者のページ').count()==0
-        # Opt-in is required to ingest the buffered chat history.
-        page.locator('#share-optin').check()
-        assert page.locator('#sync-now').is_visible()
-        page.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('他の参加者のページ')""")
-        after=page.evaluate("localStorage.getItem('vctrmemo-v2')")
-        assert after != before
-        # Turning it off stops incoming data from modifying local documents again.
-        page.locator('#share-optin').uncheck()
+        # A removed unsafe feature must not be reactivated by changing DOM state.
+        assert page.locator('#share-optin').is_disabled()
         assert page.locator('#sync-now').is_visible() is False
-        snapshot=page.evaluate("localStorage.getItem('vctrmemo-v2')")
         page.evaluate("""() => {
-          const e=VctrSync.Engine.fromState({
-            schema:1,pages:[{id:'remote_2',title:'オフの間の受信',icon:'◈',deleted:false,blocks:[]}],tasks:[]
-          });
-          window.__listener({payload:{kind:'vctrmemo-ops-v2',ops:e.export().ops}});
+          const box=document.querySelector('#share-optin');
+          box.disabled=false;box.checked=true;
+          box.dispatchEvent(new Event('change',{bubbles:true}));
+          const sender=document.querySelector('#sync-now');
+          sender.hidden=false;sender.disabled=false;sender.click();
         }""")
-        assert page.evaluate("localStorage.getItem('vctrmemo-v2')")==snapshot
-        assert page.locator('#pages-list .tree-item').filter(has_text='オフの間の受信').count()==0
-        print('vctrmemo v0.11: solo-first, inbound updates quarantined, explicit opt-in, opt-out preserved local data PASS')
+        assert page.evaluate("localStorage.getItem('vctrmemo-v2')")==before
+        assert page.locator('#pages-list .tree-item').filter(has_text='他の参加者のページ').count()==0
+        assert page.evaluate("window.__sent===undefined")
+        print('vctrmemo v0.11 regression: remote ops rejected even after DOM tampering, no chat outbound PASS')
         ctx.close()
     finally:
         browser.close()

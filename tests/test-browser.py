@@ -28,22 +28,17 @@ with sync_playwright() as p:
             page.locator('.metric-strip').wait_for(timeout=10000)
             return ctx,page
         ac,a=client();bc,b=client()
-        a.locator('#share-optin').check()
-        b.locator('#share-optin').check()
+        assert a.locator('#share-optin').is_disabled()
+        assert b.locator('#sync-now').is_visible() is False
         a.locator('#new-page').click()
-        a.locator('#doc-title').fill('転送統合テスト 🌸')
-        a.locator('#sync-now').click()
-        a.wait_for_function('window.__sent.length > 1 && !document.querySelector("#sync-now").disabled',timeout=15000)
-        updates=a.evaluate('window.__sent')
-        assert len(updates)>1
-        b.evaluate('''messages=>{
-          for (const m of messages.slice().reverse()) window.__listener({payload:m.payload});
-          for (const m of messages) window.__listener({payload:m.payload});
-        }''',updates)
-        b.wait_for_function('document.querySelector("#pages-list").innerText.includes("転送統合テスト")')
-        assert not b.locator('#show-conflicts').is_visible()
-        assert 'ops' in b.evaluate('localStorage.getItem("vctrmemo-v2")')
-        print(f'vctrmemo browser: two clients UI edit, chunk send, reverse+duplicate delivery, local save PASS ({len(updates)} updates)')
+        a.locator('#doc-title').fill('個人用メモ 🌸')
+        a.locator('#doc-title').blur()
+        assert '個人用メモ' in a.locator('#pages-list').inner_text()
+        assert '個人用メモ' not in b.locator('#pages-list').inner_text()
+        assert a.evaluate('window.__sent.length') == 0
+        assert b.evaluate('window.__sent.length') == 0
+        assert 'ops' in a.evaluate('localStorage.getItem("vctrmemo-v2")')
+        print('vctrmemo browser: two independent local workspaces, edits saved without chat transmission PASS')
         ac.close();bc.close()
     finally:
         browser.close()

@@ -94,3 +94,7 @@
 .probe-panel summary{cursor:pointer;color:#a9c6bb;font-size:11px;padding:6px 0;list-style:disclosure-closed}
 .probe-panel[open] summary{list-style:disclosure-open}
 #sync-now[hidden]{display:none!important}
+
+/* v0.12: unsupported unsafe chat collaboration must not be actionable */
+.share-optin input:disabled{opacity:.4;cursor:not-allowed}
+.share-optin:has(input:disabled){cursor:not-allowed;opacity:.8}
