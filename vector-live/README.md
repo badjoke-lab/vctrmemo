@@ -8,7 +8,7 @@
 
 - `vector-live/probe-core.mjs` — 256bitランダムの一時鍵、HKDF→AES-GCMで暗号化した合成ping/ack。チャット参加者宛ての可能性があるため、**メモ本文やワークスペース履歴は絶対に送らない**。
 - `vector-live/probe-ui.mjs` — Mini App画面に診断UIを追加。一時鍵を作成し、自分のもう1台へ入力、接続後に通信テスト。キーはlocalStorageに保存しない。
-- `scripts/build-vector-owner-probe.py` — 通常版とは異なるパッケージ名・別アプリハッシュの `vctrmemo-owner-realtime-test.xdc` を生成。**公開v0.12と既存データに変更を加えません。**
+- `scripts/build-vector-owner-probe.py` — **メモ本体の `app.js`、`sync-core.js`、保存用コードを含めない**独立した最小XDCを生成。通常版と別のパッケージ名・別の保存領域を使用し、**公開v0.12と既存データに変更を加えません。**
 - CI `vector-owner-probe.yml` — WebXDC通信APIの模擬受信と暗号化・本人識別子・異なる鍵の拒否を検証し、診断XDCをActions成果物として保存。
 
 ## 追加で判明した構造上の制約（2026-10-22）
