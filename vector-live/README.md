@@ -4,6 +4,22 @@
 
 目的は、**Vector本体を一切改修せず**、公式WebXDCの `joinRealtimeChannel()` を使い、同じVectorアカウントで利用するスマホ・PC間にリアルタイムの通信路ができるかだけを確認することです。
 
+## 起動方法 — VectorのNotesにURLを貼るだけ
+
+Vector v0.4.2以降には **Mini Apps from URLs** が実装されています。.xdcファイルへのHTTPSリンクをチャットメッセージとして送信すると、Mini Appカードとして表示されます。
+
+**固定URL（本PRをmainに取り込んでPagesデプロイした後に有効）**
+
+```text
+https://badjoke-lab.github.io/vctrmemo/vctrmemo-owner-realtime-test.xdc
+```
+
+**操作:** Vectorの「Notes（自分宛て）」に上記URLを1回貼って送信するだけです。表示されたMini Appカードをタップすると、必要に応じてアプリの取得・起動が行われます。ZIPやGitHub Actions成果物を手動ダウンロードする必要はありません。2端末で診断する際は、両端末で**同じNotesの同一投稿**を開いてください。
+
+URLは**診断アプリ配布用**です。本人用同期鍵やメモ内容は含みません。固定URLで配るのは**通信診断**であって、vctrmemo本番メモの同期ではありません。
+
+根拠: [Vector v0.4.2 release notes](https://github.com/VectorPrivacy/Vector/releases/tag/v0.4.2)、[URLから.xdcを表示する公式実装](https://github.com/VectorPrivacy/Vector/blob/20efc172693c3556a7d9b61715effc306536f46a/src/js/render/chat/xdc-url.js)。
+
 ## 何を作ったか
 
 - `vector-live/probe-core.mjs` — 256bitランダムの一時鍵、HKDF→AES-GCMで暗号化した合成ping/ack。チャット参加者宛ての可能性があるため、**メモ本文やワークスペース履歴は絶対に送らない**。
