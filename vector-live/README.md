@@ -11,6 +11,20 @@
 - `scripts/build-vector-owner-probe.py` — 通常版とは異なるパッケージ名・別アプリハッシュの `vctrmemo-owner-realtime-test.xdc` を生成。**公開v0.12と既存データに変更を加えません。**
 - CI `vector-owner-probe.yml` — WebXDC通信APIの模擬受信と暗号化・本人識別子・異なる鍵の拒否を検証し、診断XDCをActions成果物として保存。
 
+## 追加で判明した構造上の制約（2026-10-22）
+
+**Notes to Selfは公式実装に存在します。** `src/main.js` では自分の公開鍵をチャットIDと比較し「Encrypted Notes to Self」と表示します。2人目のアカウントは必要ありません。
+
+ただし、**同じアカウントの2端末間通信と、自動同期の成立は保証されません。** Vector公式の `src-tauri/src/db/miniapps.rs` では、Irohピアの既存広告を読み出す `get_active_peer_advertisements()` が `AND npub != ?2` で**自分と同じ公開鍵のピアを除外**しています。また、広告を `GROUP BY npub` でひとまとめにし、`peer-left` も公開鍵を単位に処理します。同じ本人の異なる端末をそれぞれ独立したピアとして安定管理する設計にはなっていません。
+
+- これらは**再接続・オフライン復旧に関する確定した設計上の制限**です。リアルタイムのping/ack自体が絶対に不可能とまでは断定できませんが、CIモックの成功では突破できません。
+- そもそもMini Appホストの `sendUpdate` 保存／配信、`getUpdates` 取得処理はTODOで、オフライン履歴を保存できません。
+- 合成ping/ackが実機で成功しても、これだけでNotion型メモの永続的な自動同期へ昇格させることは**禁止**します。
+- 既存のVectorを無断改修することはしません。公式ホストが改善されるまで本体内での同期完成を主張せず、ブラウザ実験版PR #6の動作と明確に区別します。
+- 公式ソース監査: `node vector-live/tests/audit-vector-owner.mjs`。GitHub Actionsで固定コミットの該当コードを読み取り、JSON結果を成果物にします。
+- [根拠: Mini Appピア広告の永続取得・除外条件](https://github.com/VectorPrivacy/Vector/blob/20efc172693c3556a7d9b61715effc306536f46a/src-tauri/src/db/miniapps.rs#L516-L610)
+- [根拠: 自分宛てNotesの判定](https://github.com/VectorPrivacy/Vector/blob/20efc172693c3556a7d9b61715effc306536f46a/src/main.js#L7368-L7378)
+
 ## 実機試験の手順（可能な場合に限る）
 
 1. 同じVectorアイデンティティで使用する2端末を用意。2アカウントは不要。
