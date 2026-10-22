@@ -43,7 +43,11 @@ jobs:
               assert 'localStorage' not in content
               assert 'owner-sync' not in ''.join(z.namelist())
               assert 'vector-live/probe-ui.mjs' in z.read('index.html').decode()
-          print('isolated Vector realtime diagnostic archive PASS')
+              assert set(z.namelist()) == {'index.html','manifest.toml','vector-live/probe-core.mjs','vector-live/probe-ui.mjs'}
+              assert 'app.js' not in z.namelist()
+              assert 'sync-core.js' not in z.namelist()
+              assert 'transfer.js' not in z.namelist()
+          print('isolated Vector realtime diagnostic archive (no personal memo code) PASS')
           PY
       - name: Upload pinned source audit evidence
         uses: actions/upload-artifact@v4
