@@ -55,6 +55,28 @@ jobs:
         run: python scripts/build.py
       - name: Verify bundle and preview
         run: python tests/test-package.py
+      - name: Build and publish URL-launchable diagnostic XDC
+        run: |
+          python scripts/build-vector-owner-probe.py
+          cp dist/probes/vctrmemo-owner-realtime-test.xdc dist/site/vctrmemo-owner-realtime-test.xdc
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          published=Path('dist/site/vctrmemo-owner-realtime-test.xdc')
+          original=Path('dist/probes/vctrmemo-owner-realtime-test.xdc')
+          assert published.read_bytes()==original.read_bytes()
+          with ZipFile(published) as archive:
+              assert archive.testzip() is None
+              assert set(archive.namelist())=={'index.html','manifest.toml','vector-live/probe-core.mjs','vector-live/probe-ui.mjs'}
+              assert b'joinRealtimeChannel' in archive.read('vector-live/probe-core.mjs')
+          print('URL-launchable Vector diagnostic archive verified:',published)
+          PY
+      - name: Upload test-only URL-launchable XDC
+        uses: actions/upload-artifact@v4
+        with:
+          name: vctrmemo-owner-realtime-test-xdc
+          path: dist/site/vctrmemo-owner-realtime-test.xdc
+          retention-days: 14
       - name: Upload tested WebXDC (no source ZIP)
         uses: actions/upload-artifact@v4
         with:
