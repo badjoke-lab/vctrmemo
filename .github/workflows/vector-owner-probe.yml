@@ -1,0 +1,49 @@
+name: Test Vector owner-only realtime diagnostic
+on:
+  pull_request:
+    paths:
+      - "vector-live/**"
+      - "scripts/build-vector-owner-probe.py"
+      - ".github/workflows/vector-owner-probe.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  owner-channel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check experimental JS syntax
+        run: |
+          node --check vector-live/probe-core.mjs
+          node --check vector-live/probe-ui.mjs
+      - name: Two independent fake Vector host sessions
+        run: node vector-live/tests/probe.test.mjs
+      - name: Build separate standalone owner realtime diagnostic
+        run: python scripts/build-vector-owner-probe.py
+      - name: Validate diagnostic archive never contains personal user files or relay dependencies
+        run: |
+          python - <<'PY'
+          from zipfile import ZipFile
+          xdc='dist/probes/vctrmemo-owner-realtime-test.xdc'
+          with ZipFile(xdc) as z:
+              assert not z.testzip()
+              content=z.read('vector-live/probe-core.mjs').decode()
+              assert 'joinRealtimeChannel' in content
+              assert 'localStorage' not in content
+              assert 'owner-sync' not in ''.join(z.namelist())
+              assert 'vector-live/probe-ui.mjs' in z.read('index.html').decode()
+          print('isolated Vector realtime diagnostic archive PASS')
+          PY
+      - name: Upload Vector diagnostic XDC
+        uses: actions/upload-artifact@v4
+        with:
+          name: vector-owner-realtime-test-xdc
+          path: dist/probes/vctrmemo-owner-realtime-test.xdc
+          retention-days: 14
