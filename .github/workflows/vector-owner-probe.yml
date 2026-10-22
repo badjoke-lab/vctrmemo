@@ -23,6 +23,10 @@ jobs:
         run: |
           node --check vector-live/probe-core.mjs
           node --check vector-live/probe-ui.mjs
+      - name: Audit real Vector same-npub peer-discovery and history constraints
+        run: node vector-live/tests/audit-vector-owner.mjs > vector-host-owner-audit.json
+      - name: Print read-only host audit
+        run: cat vector-host-owner-audit.json
       - name: Two independent fake Vector host sessions
         run: node vector-live/tests/probe.test.mjs
       - name: Build separate standalone owner realtime diagnostic
@@ -41,6 +45,12 @@ jobs:
               assert 'vector-live/probe-ui.mjs' in z.read('index.html').decode()
           print('isolated Vector realtime diagnostic archive PASS')
           PY
+      - name: Upload pinned source audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: vector-owner-host-audit
+          path: vector-host-owner-audit.json
+          retention-days: 14
       - name: Upload Vector diagnostic XDC
         uses: actions/upload-artifact@v4
         with:
