@@ -1,43 +1,52 @@
 #!/usr/bin/env python3
-"""Build an isolated, synthetic-only Vector realtime diagnostic XDC.
-
-The normal vctrmemo release and local data are not modified.
-"""
+"""Synthetic-only WebXDC owner-device realtime diagnostic: no vctrmemo app files."""
 from pathlib import Path
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
-import re
 
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'dist'/'probes'
-FILES=['index.html','styles.css','sync-core.js','transfer.js','app.js','manifest.toml',
-       'vector-live/probe-core.mjs','vector-live/probe-ui.mjs']
 XDC=OUT/'vctrmemo-owner-realtime-test.xdc'
-
+FILES=('vector-live/probe-core.mjs','vector-live/probe-ui.mjs')
+HTML="""<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vctrmemo · Vector owner realtime diagnostic</title>
+<script src="webxdc.js"></script>
+</head>
+<body style="margin:0;background:#0a1610;color:#e4ece6;font:14px system-ui;padding:20px">
+<h1>vctrmemo · 通信診断</h1>
+<p>個人メモは使用しません。画面右下の「Vector本人2端末・通信診断」を開いてください。</p>
+<script type="module" src="vector-live/probe-ui.mjs"></script>
+</body>
+</html>
+"""
+MANIFEST='name = "vctrmemo Owner Realtime Test"\n'
 def build():
     OUT.mkdir(parents=True,exist_ok=True)
+    data={
+        'index.html':HTML.encode('utf-8'),
+        'manifest.toml':MANIFEST.encode('utf-8'),
+    }
+    for file in FILES:
+        data[file]=(ROOT/file).read_bytes()
     with ZipFile(XDC,'w',compression=ZIP_DEFLATED,compresslevel=9) as z:
-        for file in FILES:
-            data=(ROOT/file).read_bytes()
-            if file=='index.html':
-                text=data.decode('utf-8')
-                assert 'src="webxdc.js"' in text
-                text=text.replace('</body>','  <script type="module" src="vector-live/probe-ui.mjs"></script>\n</body>',1)
-                data=text.encode('utf-8')
-            if file=='manifest.toml':
-                text=data.decode('utf-8')
-                text,count=re.subn(r'^name\s*=\s*"vctrmemo"\s*$', 'name = "vctrmemo Owner Realtime Test"',text,count=1,flags=re.M)
-                assert count==1
-                data=text.encode('utf-8')
-            info=ZipInfo(file,date_time=(2020,1,1,0,0,0))
-            info.compress_type=ZIP_DEFLATED
-            info.external_attr=0o644<<16
-            z.writestr(info,data)
+        for name,content in data.items():
+            meta=ZipInfo(name,date_time=(2020,1,1,0,0,0))
+            meta.compress_type=ZIP_DEFLATED
+            meta.external_attr=0o644<<16
+            z.writestr(meta,content)
     with ZipFile(XDC) as z:
-        assert not z.testzip()
-        assert set(z.namelist())==set(FILES)
+        assert z.testzip() is None
+        assert set(z.namelist())==set(data)
+        assert 'vector-live/probe-ui.mjs' in z.read('index.html').decode('utf-8')
         assert b'joinRealtimeChannel' in z.read('vector-live/probe-core.mjs')
-        assert b'vector-live/probe-ui.mjs' in z.read('index.html')
-        assert b'owner-sync' not in z.read('index.html')
-    print(f'isolated Vector owner realtime probe built: {XDC.stat().st_size} bytes')
+        assert b'localStorage' not in z.read('vector-live/probe-core.mjs')
+        assert b'localStorage' not in z.read('vector-live/probe-ui.mjs')
+        assert 'app.js' not in z.namelist()
+        assert 'sync-core.js' not in z.namelist()
+        assert 'transfer.js' not in z.namelist()
+    print(f'isolated synthetic-only Vector diagnostic XDC built: {XDC.stat().st_size} bytes')
 if __name__=='__main__':
     build()
