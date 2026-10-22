@@ -1,5 +1,5 @@
 import {createOwnerProbe,generateSecret} from './probe-core.mjs';
-// Synthetic traffic only. Never reads the user's notes or localStorage.
+// Synthetic traffic only. Never reads the user's notes or persistent browser data.
 const host=window.webxdc;
 const panel=document.createElement('section');
 panel.id='vector-owner-probe';
