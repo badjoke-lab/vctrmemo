@@ -71,7 +71,9 @@ async function flushRemote(){
     // must be recovered before claiming a complete application.
     if(!detail.missing){
       const actor=readStorage(localStorage,STORAGE).sync.actor;
-      queueReceipt(batch.filter(op=>!op.id.startsWith('a_'+actor+'_')).map(op=>op.id));
+      // Deterministic i_ seed operations already exist on both fresh clients;
+      // receipt flooding them delays real text edits and does not prove user content.
+      queueReceipt(batch.filter(op=>op.id.startsWith('a_')&&!op.id.startsWith('a_'+actor+'_')).map(op=>op.id));
     }
     status(detail.missing?'受信した変更を端末に保存・履歴不足 '+detail.missing+'件':'受信した変更を端末に保存・画面を更新しました');
   }catch(err){
@@ -97,7 +99,7 @@ function inbound(payload){
 async function tick(){
   if(!client||publishing||stopped)return;
   await flushRemote();
-  await flushReceipts();
+  void flushReceipts(); // peer acknowledgements must never block unsent edits
   // Sending local, already-persisted operations must NEVER wait for focus to leave
   // a contenteditable. Incoming merges/reloads remain deferred until editing ends.
   let stored;
