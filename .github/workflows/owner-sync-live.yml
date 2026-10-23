@@ -4,6 +4,10 @@ on:
     paths:
       - 'owner-sync/tests/live-relay.mjs'
       - 'owner-sync/relay.mjs'
+      - 'owner-sync/ui.mjs'
+      - 'owner-sync/link-bootstrap.mjs'
+      - 'owner-sync/tests/browser-live.py'
+      - 'scripts/build.py'
       - '.github/workflows/owner-sync-live.yml'
   workflow_dispatch:
 permissions:
@@ -11,7 +15,7 @@ permissions:
 jobs:
   real-relay:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,7 +35,7 @@ jobs:
       - name: Install Chromium for real two-browser test
         run: |
           python -m pip install playwright
-          python -m playwright install --with-deps chromium
+          python -m playwright install chromium
       - name: Build the unchanged XDC plus separate browser preview
         run: |
           python scripts/build.py
@@ -40,5 +44,5 @@ jobs:
         run: |
           python -m http.server 18767 --bind 127.0.0.1 --directory dist/site >/tmp/vctrmemo-local-http.log 2>&1 &
           sleep 1
-          python owner-sync/tests/browser-live.py
+          timeout 230s python -u owner-sync/tests/browser-live.py
 
