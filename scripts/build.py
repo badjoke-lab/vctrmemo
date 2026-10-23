@@ -60,6 +60,23 @@ def build():
         raise ValueError("Cannot patch per-workspace browser storage")
     # Only the browser build is rewritten. Main app and WebXDC remain unchanged.
     source = source.replace(old_key, "const STORAGE_KEY = window.__vctrmemo_owner_storage_key; if(!STORAGE_KEY)throw Error('Workspace scope missing');")
+    # Browser-only view preservation. sessionStorage is per-tab and keeps private
+    # page navigation across reloads without copying it to another device.
+    view_init = "let view = 'home';"
+    view_save = "function setView(next){ view=next; pickerFor=null;render();closeSidebar(); }"
+    if source.count(view_init) != 1 or source.count(view_save) != 1:
+        raise ValueError("Cannot patch last-opened page persistence")
+    source = source.replace(view_init, """let view = 'home';
+  const VIEW_KEY = 'vctrmemo-last-view:' + STORAGE_KEY;
+  try {
+    const savedView = sessionStorage.getItem(VIEW_KEY);
+    if (typeof savedView === 'string' && savedView.length > 0 && savedView.length < 160) view = savedView;
+  } catch (err) { console.warn('Cannot restore last page', err); }""")
+    source = source.replace(view_save, """function setView(next){
+    view=next;
+    try { sessionStorage.setItem(VIEW_KEY,next); } catch (err) { console.warn('Cannot store last page', err); }
+    pickerFor=null;render();closeSidebar();
+  }""")
     (linked_dir / "app.js").write_text(source, encoding="utf-8")
     (linked_dir / "link-bootstrap.mjs").write_bytes((ROOT / "owner-sync/link-bootstrap.mjs").read_bytes())
     for filename in APP_FILES:
