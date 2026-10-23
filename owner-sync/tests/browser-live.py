@@ -52,7 +52,7 @@ with sync_playwright() as p:
         assert a.evaluate("window.__vctrmemo_page_identity") == 'A', 'receiving a remote edit must not reload browser A'
         assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'publishing must not reload browser B'
         # A receipt must originate from the peer AFTER it applies the operation.
-        b.wait_for_function("""() => /他端末の適用確認 [1-9][0-9]*\//.test(document.querySelector('#owner-sync-state')?.textContent||'')""",timeout=90000)
+        b.wait_for_function(r"""() => /他端末の適用確認 [1-9][0-9]*\//.test(document.querySelector('#owner-sync-state')?.textContent||'')""",timeout=90000)
 
         # Regression: keep the rich text editor focused during several delayed edits.
         first=a.locator('#editor .block-edit').first
