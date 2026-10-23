@@ -2,7 +2,7 @@
 // Opening one private URL on both devices uses the same 256-bit secret from
 // the URL fragment. The secret never reaches the HTTP server or Nostr relay.
 import {ownerRelay} from './relay.mjs';
-import {mergeWorkspaceOps,readStorage} from './merge.mjs';
+import {readStorage} from './merge.mjs';
 const STORAGE=window.__vctrmemo_owner_storage_key;
 const SECRET=window.__vctrmemo_owner_secret;
 const Sync=window.VctrSync;
@@ -21,34 +21,27 @@ const style=document.createElement('style');
 style.textContent=`#owner-sync-panel summary{cursor:pointer;font-weight:600}#owner-sync-panel p{line-height:1.45;margin:10px 0}#owner-sync-panel button{font:inherit;padding:7px;margin:4px 5px 4px 0;background:#244339;border:1px solid #60806e;color:white;border-radius:5px;cursor:pointer}#owner-sync-panel .owner-warning{font-size:11px;color:#cabb9d}`;
 document.head.append(style);document.body.append(panel);
 const $=id=>document.getElementById(id),status=t=>{$('owner-sync-state').textContent=t};
-let client=null,period=null,flushing=false,publishing=false,reloadTimer=null,pending=[],published=new Set(),room='',stopped=false,connecting=false;
+let client=null,period=null,flushing=false,publishing=false,pending=[],published=new Set(),room='',stopped=false,connecting=false;
 const editing=()=>{
   const a=document.activeElement;
   return a&&((a.isContentEditable)||(['INPUT','TEXTAREA'].includes(a.tagName)));
 };
 function savePublished(){localStorage.setItem('vctrmemo-owner-published-'+room,JSON.stringify([...published].slice(-12000)));}
-function scheduleReload(){
-  clearTimeout(reloadTimer);
-  reloadTimer=setTimeout(()=>{
-    if(stopped)return;
-    if(editing()){scheduleReload();return;}
-    // app.js stores the open page in per-workspace sessionStorage before reloading.
-    location.reload();
-  },750);
-}
 async function flushRemote(){
   if(stopped||flushing||!pending.length||editing())return;
   flushing=true;
   try{
-    const now=readStorage(localStorage,STORAGE);
-    const result=mergeWorkspaceOps(now.sync,pending,Sync);
-    if(result.changed){
-      localStorage.setItem(STORAGE,JSON.stringify({...now,sync:result.sync}));
-      status(result.missing?'受信済み・不足履歴の取得待ち':'受信した変更履歴を統合しました');
-      scheduleReload();
-    }
-    for(const op of pending)published.add(op.id);
-    savePublished();pending=[];
+    // App.js is the ONLY writer of workspace operations. Applying a relay
+    // message directly to localStorage leaves the running editor stale and can
+    // erase remote history on its next keystroke.
+    const batch=pending.slice();
+    const detail={ops:batch,applied:false,error:'',missing:0};
+    document.dispatchEvent(new CustomEvent('vctrmemo-owner-apply',{detail}));
+    if(!detail.applied)throw Error(detail.error||'Application did not confirm local commit');
+    for(const op of batch)published.add(op.id);
+    savePublished();
+    pending.splice(0,batch.length);
+    status(detail.missing?'受信した変更を端末に保存・履歴不足 '+detail.missing+'件':'受信した変更を端末に保存・画面を更新しました');
   }catch(err){
     status('受信処理を保留: '+err.message);console.error(err);
   }finally{flushing=false;}
@@ -108,7 +101,7 @@ $('owner-disconnect').onclick=()=>{
     return;
   }
   stopped=true;
-  clearTimeout(reloadTimer);clearInterval(period);period=null;
+  clearInterval(period);period=null;
   client?.stop();client=null;
   $('owner-disconnect').textContent='同期を再開';
   status('同期を一時停止中です。再開するには「同期を再開」を押してください。');
