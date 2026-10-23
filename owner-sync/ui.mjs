@@ -102,7 +102,10 @@ async function tick(){
   // a contenteditable. Incoming merges/reloads remain deferred until editing ends.
   let stored;
   try{stored=readStorage(localStorage,STORAGE);}catch(err){status(err.message);return;}
-  const next=stored.sync.ops.filter(op=>Sync.isValidOp(op)&&!published.has(op.id)).slice(0,20);
+  const unsent=stored.sync.ops.filter(op=>Sync.isValidOp(op)&&!published.has(op.id));
+  // Fresh user edits must not sit behind ~138 built-in initialization fields.
+  // Preserve causal order within each class; predecessors can be recovered.
+  const next=[...unsent.filter(op=>op.id.startsWith('a_')),...unsent.filter(op=>!op.id.startsWith('a_'))].slice(0,20);
   if(!next.length)return;
   publishing=true;
   try{
