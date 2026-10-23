@@ -27,7 +27,20 @@ with sync_playwright() as p:
         a.locator('#new-page').click()
         a.locator('#doc-title').fill('リンクで同期したページ')
         a.locator('#doc-title').blur()
-        b.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('リンクで同期したページ')""",timeout=90000)
+        for label,page in [('A',a),('B',b)]:
+            page.on('pageerror',lambda e,n=label:print('JS ERROR',n,str(e),flush=True))
+            page.on('console',lambda m,n=label:print('CONSOLE',n,m.text[:260],flush=True) if m.type=='error' else None)
+        a.wait_for_timeout(14000)
+        for label,page in [('A',a),('B',b)]:
+            info=page.evaluate("""() => ({
+              status:document.querySelector('#owner-sync-state')?.textContent,
+              titles:document.querySelector('#pages-list')?.textContent?.slice(0,240),
+              key:window.__vctrmemo_owner_storage_key,
+              ops:JSON.parse(localStorage.getItem(window.__vctrmemo_owner_storage_key)||'{}').sync?.ops?.length,
+              sent:localStorage.getItem('vctrmemo-owner-published-'+(window.__vctrmemo_owner_storage_key||'').slice(-20))
+            })""")
+            print('E2E STATE',label,info,flush=True)
+        b.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('リンクで同期したページ')""",timeout=25000)
         b.locator('#pages-list').get_by_text('リンクで同期したページ').click()
         b.locator('#doc-title').fill('BからAへの更新')
         b.locator('#doc-title').blur()
