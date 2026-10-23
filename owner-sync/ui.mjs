@@ -45,10 +45,11 @@ async function flushRemote(){
     status('受信処理を保留: '+err.message);console.error(err);
   }finally{flushing=false;}
 }
-function inbound(op){
-  if(!Sync.isValidOp(op))return;
-  // Do not mark as integrated until validation and durable merge succeed.
-  pending.push(op);setTimeout(flushRemote,500);
+function inbound(payload){
+  const changes=payload?.batch===undefined?[payload]:payload.batch;
+  if(!Array.isArray(changes)||changes.length<1||changes.length>20||!changes.every(Sync.isValidOp))return;
+  // Persist first, then mark as acknowledged. Reject entire malformed batch.
+  pending.push(...changes);setTimeout(flushRemote,250);
 }
 async function tick(){
   if(!client||publishing||stopped)return;
@@ -56,10 +57,15 @@ async function tick(){
   if(editing()||pending.length)return;
   let stored;
   try{stored=readStorage(localStorage,STORAGE);}catch(err){status(err.message);return;}
-  const next=stored.sync.ops.find(op=>Sync.isValidOp(op)&&!published.has(op.id));
-  if(!next)return;
+  const next=stored.sync.ops.filter(op=>Sync.isValidOp(op)&&!published.has(op.id)).slice(0,20);
+  if(!next.length)return;
   publishing=true;
-  try{await client.publish(next);published.add(next.id);savePublished();status('暗号化した変更を送信済み ('+published.size+'件)');}
+  try{
+    await client.publishBatch(next);
+    for(const op of next)published.add(op.id);
+    savePublished();
+    status('暗号化した変更を送信済み ('+published.size+'/'+stored.sync.ops.length+'件)');
+  }
   catch(err){status('送信失敗・再試行します: '+err.message);}
   finally{publishing=false;}
 }
