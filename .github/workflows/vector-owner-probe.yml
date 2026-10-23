@@ -35,7 +35,7 @@ jobs:
         run: |
           python - <<'PY'
           from zipfile import ZipFile
-          xdc='dist/probes/vctrmemo-owner-realtime-test.xdc'
+          xdc='dist/probes/vctrmemo-owner-realtime-auto-v2.xdc'
           with ZipFile(xdc) as z:
               assert not z.testzip()
               content=z.read('vector-live/probe-core.mjs').decode()
@@ -58,6 +58,6 @@ jobs:
       - name: Upload Vector diagnostic XDC
         uses: actions/upload-artifact@v4
         with:
-          name: vector-owner-realtime-test-xdc
-          path: dist/probes/vctrmemo-owner-realtime-test.xdc
+          name: vector-owner-realtime-auto-v2-xdc
+          path: dist/probes/vctrmemo-owner-realtime-auto-v2.xdc
           retention-days: 14
