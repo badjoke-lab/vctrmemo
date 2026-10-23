@@ -41,9 +41,27 @@ def build():
     if 'src="webxdc.js"' in preview:
         raise ValueError("WebXDC host bridge script was not removed")
     preview = preview.replace('</head>', '  <style>#sync-now{display:none!important}</style>\n</head>', 1)
-    # Browser-only: never bundle sync-over-public-relays into the isolated .xdc.
-    preview = preview.replace('</body>', '  <script type="module" src="owner-sync.js"></script></body>', 1)
     (SITE / "index.html").write_text(preview, encoding="utf-8")
+
+    # Opt-in, private-link browser-only workspace. Never reads legacy local notes.
+    linked_dir = SITE / "synced"
+    linked_dir.mkdir(parents=True, exist_ok=True)
+    linked = preview.replace('href="styles.css"', 'href="../styles.css"')
+    linked = linked.replace('src="sync-core.js"', 'src="../sync-core.js"')
+    linked = linked.replace('src="transfer.js"', 'src="../transfer.js"')
+    if 'src="app.js" defer' not in linked:
+        raise ValueError("Cannot locate the app bootstrap script")
+    linked = linked.replace('  <script src="app.js" defer></script>', '')
+    linked = linked.replace('</body>', '  <script type="module" src="link-bootstrap.mjs"></script>\n</body>', 1)
+    (linked_dir / "index.html").write_text(linked, encoding="utf-8")
+    source = (ROOT / "app.js").read_text(encoding="utf-8")
+    old_key = "const STORAGE_KEY = 'vctrmemo-v2';"
+    if source.count(old_key) != 1:
+        raise ValueError("Cannot patch per-workspace browser storage")
+    # Only the browser build is rewritten. Main app and WebXDC remain unchanged.
+    source = source.replace(old_key, "const STORAGE_KEY = window.__vctrmemo_owner_storage_key; if(!STORAGE_KEY)throw Error('Workspace scope missing');")
+    (linked_dir / "app.js").write_text(source, encoding="utf-8")
+    (linked_dir / "link-bootstrap.mjs").write_bytes((ROOT / "owner-sync/link-bootstrap.mjs").read_bytes())
     for filename in APP_FILES:
         if filename not in ("index.html", "manifest.toml"):
             (SITE / filename).write_bytes((ROOT / filename).read_bytes())
