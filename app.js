@@ -765,5 +765,42 @@
   $('sync-now').addEventListener('click',()=>{
     toast('チャット共有は安全な権限・保存領域の分離が完成するまで利用できません。');
   });
+  // The browser-only owner sync must not write localStorage behind this editor.
+  // Apply remote operations through the SAME engine that captures keystrokes.
+  // A synchronous CustomEvent acts as the application/transport commit boundary.
+  document.addEventListener('vctrmemo-owner-apply', event => {
+    if(!window.__vctrmemo_owner_storage_key || STORAGE_KEY!==window.__vctrmemo_owner_storage_key)return;
+    const detail=event.detail;
+    if(!detail||!Array.isArray(detail.ops)||detail.ops.length<1||detail.ops.length>12000)return;
+    try {
+      const known=new Map(engine.export().ops.map(op=>[op.id,JSON.stringify(op)]));
+      const fresh=[],staged=new Map();
+      for(const op of detail.ops){
+        if(!VctrSync.isValidOp(op))throw Error('Invalid remote operation');
+        const serialized=JSON.stringify(op);
+        if(known.has(op.id)){if(known.get(op.id)!==serialized)throw Error('Conflicting operation ID');continue;}
+        if(staged.has(op.id)){if(staged.get(op.id)!==serialized)throw Error('Conflicting operation ID');continue;}
+        staged.set(op.id,serialized);fresh.push(op);
+      }
+      if(fresh.length){
+        const trial=new VctrSync.Engine(engine.export().ops,engine.actor,engine.counter);
+        // Commit any locally edited field BEFORE incorporating remote operations.
+        // Otherwise stale app state could silently replace already received data.
+        trial.capture(state,baseline);
+        if(trial.merge(fresh)!==fresh.length)throw Error('History capacity exceeded');
+        const projected=trial.project();
+        // Durable local commit must succeed BEFORE notifying the transport.
+        localStorage.setItem(STORAGE_KEY,JSON.stringify({sync:trial.export()}));
+        engine=trial;state=projected;baseline=structuredClone(state);
+        $('save-state').textContent='● 端末保存済み';
+        updateConflictButton();updateSyncState();
+        // No location.reload(): preserve this tab's selected page.
+        // The transport defers dispatch during editing/IME composition.
+        render();
+      }
+      detail.applied=true;
+      detail.missing=engine.missingPredecessors().length;
+    }catch(err){detail.error=String(err.message||err);console.error('Owner-sync merge rejected',err);}
+  });
   persist(true);render();updateSyncState();
 })();
