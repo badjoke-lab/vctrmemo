@@ -1,3 +1,30 @@
+# One private link: owner E2EE browser experiment
+
+**Status: experimental; no actual Vector Mini App synchronization. Not merged to main.**
+
+Vector Notesで下記の**固定の入口ページ**を開くと、ブラウザ上で暗号学的にランダムな256bit秘密鍵を生成し、アドレス末尾の `#k=...` に配置します。ページにある「自分専用URLをコピー」を一度押し、その完全なURLをVectorの**自分宛てNotes**へ送信します。PCとスマホで同じNotesの完全URLを開けば、追加アカウント・鍵の手入力なしで、**その新規ワークスペースのみ**AES-256-GCMで暗号化してNostrリレー経由で双方向同期します。
+
+```text
+https://badjoke-lab.github.io/vctrmemo/synced/
+```
+
+**このURLは未公開です。CIによるテストとレビューが終わるまで利用可能だと案内しません。**
+
+- この入口はVector `.xdc` Mini Appではなく**ブラウザ版**です。Vector本体の通信機能、Vector SDKの認証、Iroh P2P通信は使用しません。Vector NotesはただのプライベートURL置き場になります。
+- `#k` 秘密鍵を含むリンクそのものがワークスペースへの完全な読み書き権限です。URLを他人に知らせたり公開のグループへ投稿したりすると、内容の復号・改変を許します。端末の失効・鍵の交換は未実装です。
+- URLフラグメントはHTTPリクエストとしてGitHub Pagesへ送信されませんが、ブラウザ履歴、コピー先のNotes、画面共有などから流出する危険があります。鍵をローカルストレージに平文では保存せず、ページのURLと実行中のメモリにだけ保持します。
+- `/synced/` の保存領域は秘密鍵から求めたワークスペースIDで独立させています。既存の `vctrmemo-v2` の端末メモは**読み込まず、アップロードせず、変更しません**。
+- Nostr公開リレーは暗号文しか受け取りませんが、イベントサイズ、更新時刻、件数と公開の匿名識別子が見えます。サーバーの保存期間・到達性は保証できません。大規模ノートの完全復旧、同時競合・削除、リレー障害対応は製品の完成基準には未達です。
+
+## テスト
+
+- 暗号化/復号と誤鍵/改ざんの拒否: `owner-sync/tests/codec.test.mjs`
+- 双方向操作統合（合成リレー）: `owner-sync/tests/relay.test.mjs`
+- ブラウザ2独立プロフィール・実公開リレーでA→B、B→A、切断後の履歴追いつき: `owner-sync/tests/browser-live.py`
+- `.xdc` に外部WebSocket送信機能を含めず、従来のブラウザ保存データから分離するパッケージテスト: `owner-sync/tests/package.test.py`
+
+---
+
 # Experimental owner-only encrypted sync (browser preview)
 
 **Status: PROTOTYPE. Not merged. Not available inside Vector Mini Apps. Not signed in with the Vector account.**
