@@ -15,12 +15,14 @@ const local={schema:1,pages:[],tasks:[]};
 const a=Sync.Engine.fromState(local),b=Sync.Engine.fromState(local);
 let receivedA=0,receivedB=0,receivedBad=0;
 const receiverA=await ownerRelay({secret,pool:pA,relays:['wss://local.invalid'],onOperation:async op=>{
-  const merged=mergeWorkspaceOps(a.export(),[op],Sync);
-  if(merged.changed){a.merge([op]);receivedA++;}
+  const ops=Array.isArray(op.batch)?op.batch:[op];
+  const merged=mergeWorkspaceOps(a.export(),ops,Sync);
+  if(merged.changed){a.merge(ops);receivedA+=ops.length;}
 }});
 const receiverB=await ownerRelay({secret,pool:pB,relays:['wss://local.invalid'],onOperation:async op=>{
-  const merged=mergeWorkspaceOps(b.export(),[op],Sync);
-  if(merged.changed){b.merge([op]);receivedB++;}
+  const ops=Array.isArray(op.batch)?op.batch:[op];
+  const merged=mergeWorkspaceOps(b.export(),ops,Sync);
+  if(merged.changed){b.merge(ops);receivedB+=ops.length;}
 }});
 const other=await ownerRelay({secret:badSecret,pool:pBad,relays:['wss://local.invalid'],onOperation:()=>receivedBad++});
 receiverA.start();receiverB.start();other.start();
@@ -37,5 +39,12 @@ const first=mergeWorkspaceOps(a.export(),[op1],Sync);
 assert.equal(first.changed,false,'duplicate must not change history');
 assert.throws(()=>mergeWorkspaceOps(a.export(),[{...op1,value:'tampered'}],Sync),/Conflicting/);
 assert.ok(receivedA>=1 && receivedB>=1,'bidirectional delivery');
+const batch=[];
+for(let i=0;i<20;i++)batch.push(a.change(JSON.stringify(['P','page-A','title']),'一括変更 '+i));
+await receiverA.publishBatch(batch);
+await new Promise(r=>setTimeout(r,40));
+assert.equal(b.project().pages.find(p=>p.id==='page-A').title,'一括変更 19','20 encrypted ops must merge atomically');
+await assert.rejects(receiverA.publishBatch([]),/Invalid batch size/);
+await assert.rejects(receiverA.publishBatch(Array(21).fill(batch[0])),/Invalid batch size/);
 receiverA.stop();receiverB.stop();other.stop();
 console.log('owner sync: two-client signed encrypted relay, bidirectional merge, third-key isolation, duplicate rejection PASS');
