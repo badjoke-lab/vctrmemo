@@ -11,6 +11,15 @@ export async function ownerRelay({secret,relays=RELAYS,pool=new SocketPool(),onO
   let subscription=null;
   let closed=false;
   const filter={kinds:[KIND],authors:[pubkey],'#d':[box.room],limit:5000};
+  async function emit(payload){
+    if(closed)throw Error('Transport closed');
+    const ciphertext=await box.seal(payload);
+    const event=finalizeEvent({kind:KIND,created_at:Math.floor(Date.now()/1000),tags:[['d',box.room]],content:ciphertext},box.signingKey);
+    if(!verifyEvent(event))throw Error('Signing failed');
+    const promises=pool.publish(relays,event);
+    await Promise.any(Array.from(promises));
+    return event.id;
+  }
   const subscriptionOpts={
     onevent:async event=>{
       if(closed||seenEvents.has(event.id)||event.pubkey!==pubkey||event.kind!==KIND)return;
@@ -29,13 +38,11 @@ export async function ownerRelay({secret,relays=RELAYS,pool=new SocketPool(),onO
       subscription=pool.subscribeMany(relays,[filter],subscriptionOpts);
     },
     async publish(op){
-      if(closed)throw Error('Transport closed');
-      const ciphertext=await box.seal(op);
-      const event=finalizeEvent({kind:KIND,created_at:Math.floor(Date.now()/1000),tags:[['d',box.room]],content:ciphertext},box.signingKey);
-      if(!verifyEvent(event))throw Error('Signing failed');
-      const promises=pool.publish(relays,event);
-      await Promise.any(Array.from(promises));
-      return event.id;
+      return emit(op);
+    },
+    async publishBatch(ops){
+      if(!Array.isArray(ops)||ops.length===0||ops.length>20)throw Error('Invalid batch size (1-20)');
+      return emit({batch:ops});
     },
     stop(){
       closed=true;
