@@ -1,6 +1,6 @@
 import {createOwnerProbe} from './probe-core.mjs';
 // Zero-setup diagnostic: opens from an .xdc URL in Vector Notes.
-// Never reads the user's notes, database, localStorage, or private keys.
+// Never reads user notes, databases, local persistent data, or private keys.
 const panel=document.createElement('section');
 panel.id='owner-probe-v2';
 panel.innerHTML=`
