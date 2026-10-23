@@ -11,6 +11,8 @@ assert '<script type="module" src="link-bootstrap.mjs"></script>' in linked
 assert '<script src="../sync-core.js" defer></script>' in linked
 assert 'window.__vctrmemo_owner_storage_key' in scoped
 assert "const STORAGE_KEY = 'vctrmemo-v2'" not in scoped
+assert "sessionStorage.getItem(VIEW_KEY)" in scoped
+assert "sessionStorage.setItem(VIEW_KEY,next)" in scoped
 assert '#k=' in bootstrap and 'crypto.subtle.digest' in bootstrap
 bundle=site/'owner-sync.js'
 assert bundle.is_file() and bundle.stat().st_size>10000
