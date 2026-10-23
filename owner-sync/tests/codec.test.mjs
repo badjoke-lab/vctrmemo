@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {newSecret,openWorkspace} from '../codec.mjs';
+const secret=newSecret(),other=newSecret();
+assert.match(secret,/^[0-9a-f]{64}$/);
+assert.notEqual(secret,other);
+const a=await openWorkspace(secret),b=await openWorkspace(secret),c=await openWorkspace(other);
+assert.equal(a.room,b.room);assert.notEqual(a.room,c.room);
+const op={id:'a_device_1',key:'["P","p1","title"]',pred:[],value:'こんにちは・個人メモ'};
+const x=await a.seal(op),y=await a.seal(op);
+assert.notEqual(x,y,'random AES-GCM IV required');
+assert.deepEqual(await b.unseal(x),op);
+assert.equal(x.includes('こんにちは'),false,'plaintext must never be in relay event');
+await assert.rejects(()=>c.unseal(x));
+await assert.rejects(()=>b.unseal(x.replace(/.$/,x.endsWith('A')?'B':'A')));
+await assert.rejects(()=>openWorkspace('weak'));
+await assert.rejects(()=>a.seal({value:'X'.repeat(25000)}));
+console.log('owner sync codec: same-key round trip; different-key denial; randomized AEAD; tamper rejection PASS');

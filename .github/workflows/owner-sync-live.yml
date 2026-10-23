@@ -1,0 +1,48 @@
+name: Experimental live encrypted relay smoke
+on:
+  pull_request:
+    paths:
+      - 'owner-sync/tests/live-relay.mjs'
+      - 'owner-sync/relay.mjs'
+      - 'owner-sync/ui.mjs'
+      - 'owner-sync/link-bootstrap.mjs'
+      - 'owner-sync/tests/browser-live.py'
+      - 'scripts/build.py'
+      - '.github/workflows/owner-sync-live.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned Nostr client
+        run: npm install --no-save --no-package-lock nostr-tools@2.23.8 ws@8.18.3 esbuild@0.25.12
+      - name: Diagnose public relay WebSocket connectivity
+        run: node owner-sync/tests/probe-network.mjs
+      - name: Probe signed NIP-01 event delivery and relay responses
+        run: node owner-sync/tests/probe-event.mjs
+      - name: Send synthetic ciphertext through public Nostr relay
+        run: timeout 40s node owner-sync/tests/live-relay.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Chromium for real two-browser test
+        run: |
+          python -m pip install playwright
+          python -m playwright install chromium
+      - name: Build the unchanged XDC plus separate browser preview
+        run: |
+          python scripts/build.py
+          ./node_modules/.bin/esbuild owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=dist/site/owner-sync.js
+      - name: Test actual vctrmemo pages across two browser contexts
+        run: |
+          python -m http.server 18767 --bind 127.0.0.1 --directory dist/site >/tmp/vctrmemo-local-http.log 2>&1 &
+          sleep 1
+          timeout 230s python -u owner-sync/tests/browser-live.py
+
