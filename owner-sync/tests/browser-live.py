@@ -19,6 +19,9 @@ with sync_playwright() as p:
         b.locator('#owner-sync-panel').wait_for(timeout=30000)
         b.wait_for_function("""() => document.querySelector('#owner-sync-state').textContent.includes('接続しました')""",timeout=20000)
         assert a.url==b.url
+        # Distinct markers detect an unwanted location.reload after receiving edits.
+        a.evaluate("window.__vctrmemo_page_identity='A'")
+        b.evaluate("window.__vctrmemo_page_identity='B'")
         # Existing local-only workspace is not shared or overwritten.
         for page in (a,b):
             assert page.evaluate("localStorage.getItem('vctrmemo-v2')") is None
@@ -45,7 +48,11 @@ with sync_playwright() as p:
         b.locator('#doc-title').fill('BからAへの更新')
         b.locator('#doc-title').blur()
         a.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('BからAへの更新')""",timeout=90000)
-        assert a.locator('#doc-title').input_value() == 'BからAへの更新', 'remote reload must preserve the current page'
+        assert a.locator('#doc-title').input_value() == 'BからAへの更新'
+        assert a.evaluate("window.__vctrmemo_page_identity") == 'A', 'receiving a remote edit must not reload browser A'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'publishing must not reload browser B'
+        # A receipt must originate from the peer AFTER it applies the operation.
+        b.wait_for_function("""() => /他端末の適用確認 [1-9][0-9]*\//.test(document.querySelector('#owner-sync-state')?.textContent||'')""",timeout=90000)
 
         # Regression: keep the rich text editor focused during several delayed edits.
         first=a.locator('#editor .block-edit').first
@@ -66,6 +73,7 @@ with sync_playwright() as p:
         b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('同期できるか'))""",timeout=50000)
         assert a.locator('#doc-title').input_value() == 'BからAへの更新'
         assert b.locator('#doc-title').input_value() == 'BからAへの更新'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'receiving focused-editor blocks must not reload browser B'
         print('FOCUSED EDITOR: three text blocks sent without leaving contenteditable PASS',flush=True)
 
         # Pause is explicit; pressing the same button again resumes without reload.
@@ -77,6 +85,7 @@ with sync_playwright() as p:
         b.locator('#owner-disconnect').click()
         b.wait_for_function("""() => document.querySelector('#doc-title')?.value === 'オフライン後の追いつき'""",timeout=90000)
         assert b.locator('#owner-disconnect').inner_text() == '同期を停止'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'reconnect must not force reload'
         # Manual reload should keep the same opened document on both browsers.
         b.reload(wait_until='domcontentloaded')
         b.locator('#owner-sync-panel').wait_for(timeout=30000)
@@ -86,7 +95,7 @@ with sync_playwright() as p:
         assert a.locator('#doc-title').input_value() == 'オフライン後の追いつき'
         assert b.locator('#editor .block-edit').nth(2).inner_text() == '同期できるか'
         assert a.url==b.url,'private-link fragment remains stable across reload'
-        print('browser owner LIVE RELAY: A→B and B→A, delayed text edits without blur, pause/resume, catchup, and page restoration PASS',flush=True)
+        print('browser owner LIVE RELAY: in-place A→B and B→A, confirmed peer application, focused edits, pause/resume and page restoration PASS',flush=True)
         a.close();b.close();ca.close();cb.close()
     finally:
         browser.close()
