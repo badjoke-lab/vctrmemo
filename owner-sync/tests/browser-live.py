@@ -45,15 +45,48 @@ with sync_playwright() as p:
         b.locator('#doc-title').fill('BからAへの更新')
         b.locator('#doc-title').blur()
         a.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('BからAへの更新')""",timeout=90000)
+        assert a.locator('#doc-title').input_value() == 'BからAへの更新', 'remote reload must preserve the current page'
+
+        # Regression: keep the rich text editor focused during several delayed edits.
+        first=a.locator('#editor .block-edit').first
+        first.fill('さらに入力')
+        assert a.evaluate('document.activeElement.isContentEditable'), 'editor must remain focused'
+        b.wait_for_function("""() => document.querySelector('#editor .block-edit')?.textContent.includes('さらに入力')""",timeout=50000)
+        a.wait_for_timeout(2200)
+        first.press('Enter')
+        second=a.locator('#editor .block-edit').nth(1)
+        second.fill('入力をさらに行った')
+        assert a.evaluate('document.activeElement.isContentEditable'), 'new line still focused'
+        b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('入力をさらに行った'))""",timeout=50000)
+        a.wait_for_timeout(2200)
+        second.press('Enter')
+        third=a.locator('#editor .block-edit').nth(2)
+        third.fill('同期できるか')
+        assert a.evaluate('document.activeElement.isContentEditable'), 'third line still focused'
+        b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('同期できるか'))""",timeout=50000)
+        assert a.locator('#doc-title').input_value() == 'BからAへの更新'
+        assert b.locator('#doc-title').input_value() == 'BからAへの更新'
+        print('FOCUSED EDITOR: three text blocks sent without leaving contenteditable PASS',flush=True)
+
+        # Pause is explicit; pressing the same button again resumes without reload.
         b.locator('#owner-disconnect').click()
-        a.locator('#pages-list').get_by_text('BからAへの更新').click()
+        assert b.locator('#owner-disconnect').inner_text() == '同期を再開'
         a.locator('#doc-title').fill('オフライン後の追いつき')
         a.locator('#doc-title').blur()
         assert 'オフライン後の追いつき' not in b.locator('#pages-list').inner_text()
+        b.locator('#owner-disconnect').click()
+        b.wait_for_function("""() => document.querySelector('#doc-title')?.value === 'オフライン後の追いつき'""",timeout=90000)
+        assert b.locator('#owner-disconnect').inner_text() == '同期を停止'
+        # Manual reload should keep the same opened document on both browsers.
         b.reload(wait_until='domcontentloaded')
-        b.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('オフライン後の追いつき')""",timeout=90000)
+        b.locator('#owner-sync-panel').wait_for(timeout=30000)
+        assert b.locator('#doc-title').input_value() == 'オフライン後の追いつき'
+        a.reload(wait_until='domcontentloaded')
+        a.locator('#owner-sync-panel').wait_for(timeout=30000)
+        assert a.locator('#doc-title').input_value() == 'オフライン後の追いつき'
+        assert b.locator('#editor .block-edit').nth(2).inner_text() == '同期できるか'
         assert a.url==b.url,'private-link fragment remains stable across reload'
-        print('browser owner ONE-LINK REAL RELAY: separate Chromium profiles; A→B and B→A; disconnected peer catches up; legacy data isolated PASS')
+        print('browser owner LIVE RELAY: A→B and B→A, delayed text edits without blur, pause/resume, catchup, and page restoration PASS',flush=True)
         a.close();b.close();ca.close();cb.close()
     finally:
         browser.close()
