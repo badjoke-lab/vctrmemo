@@ -43,7 +43,7 @@ with sync_playwright() as p:
         editor.type('二行目')
         assert first.locator('#editor .block-edit').count()==1, 'Enter unexpectedly created a separate text block'
         assert '一行目' in editor.inner_text() and '二行目' in editor.inner_text()
-        assert '\\n' in editor.inner_text(), 'Enter did not create an ordinary newline'
+        assert '\n' in editor.inner_text(), 'Enter did not create an ordinary newline'
         ime=first.evaluate("""() => {
           const field=document.querySelector('#editor .block-edit');
           const count=()=>document.querySelectorAll('#editor .block-edit').length;
