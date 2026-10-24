@@ -112,12 +112,29 @@ with sync_playwright() as p:
           return {ids:saved.filter(op=>!before.has(op.id)).map(op=>op.id),value:title.value};
         }""")
         assert len(stress['ids'])==120, 'all 120 input events must be committed to local storage'
-        b.wait_for_function("""expected => {
-          const ops=JSON.parse(localStorage.getItem(window.__vctrmemo_owner_storage_key)).sync.ops;
-          const ids=new Set(ops.map(op=>op.id));
-          return expected.ids.every(id=>ids.has(id))
-            && document.querySelector('#doc-title')?.value===expected.value;
-        }""",arg=stress,timeout=90000)
+        try:
+            b.wait_for_function("""expected => {
+              const ops=JSON.parse(localStorage.getItem(window.__vctrmemo_owner_storage_key)).sync.ops;
+              const ids=new Set(ops.map(op=>op.id));
+              return expected.ids.every(id=>ids.has(id))
+                && document.querySelector('#doc-title')?.value===expected.value;
+            }""",arg=stress,timeout=65000)
+        except Exception:
+            for name,page in [('A',a),('B',b)]:
+                diagnostic=page.evaluate("""expected => {
+                  const key=window.__vctrmemo_owner_storage_key;
+                  const stored=JSON.parse(localStorage.getItem(key));
+                  const known=new Set(stored.sync.ops.map(op=>op.id));
+                  return {
+                    totalOps:stored.sync.ops.length,
+                    missingExpected:expected.ids.filter(id=>!known.has(id)),
+                    title:document.querySelector('#doc-title')?.value,
+                    syncStatus:document.querySelector('#owner-sync-state')?.textContent,
+                    missingPredecessors:(new VctrSync.Engine(stored.sync.ops,stored.sync.actor,stored.sync.counter)).missingPredecessors().length
+                  };
+                }""",stress)
+                print('STRESS TIMEOUT DIAGNOSTIC',name,diagnostic,flush=True)
+            raise
         assert a.evaluate("window.__vctrmemo_page_identity") == 'after-stress-A'
         assert b.evaluate("window.__vctrmemo_page_identity") == 'after-stress-B'
         assert a.locator('#doc-title').input_value() == stress['value']
