@@ -35,6 +35,28 @@ with sync_playwright() as p:
         first.locator('#new-page').click()
         first.locator('#doc-title').fill('個人データは送信しない')
         first.locator('#doc-title').blur()
+        # Japanese input confirmation may NOT be mistaken for a new text
+        # block, and plain Enter must insert a newline like a text editor.
+        editor=first.locator('#editor .block-edit').first
+        editor.fill('一行目')
+        editor.press('Enter')
+        editor.type('二行目')
+        assert first.locator('#editor .block-edit').count()==1, 'Enter unexpectedly created a separate text block'
+        assert '一行目' in editor.inner_text() and '二行目' in editor.inner_text()
+        assert '\n' in editor.inner_text(), 'Enter did not create an ordinary newline'
+        ime=first.evaluate("""() => {
+          const field=document.querySelector('#editor .block-edit');
+          const count=()=>document.querySelectorAll('#editor .block-edit').length;
+          field.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+          const before=count();
+          const allowed=field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));
+          field.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
+          return {before,after:count(),allowed};
+        }""")
+        assert ime['before']==ime['after'] and ime['allowed'],ime
+        editor.press('Control+Enter')
+        assert first.locator('#editor .block-edit').count()==2, 'Ctrl+Enter should create an explicit block'
+        first.locator('#editor .block-edit').nth(1).fill('別のブロック')
         saved=first.evaluate("localStorage.getItem('vctrmemo-v2')")
         assert saved and '個人データは送信しない' in first.locator('#pages-list').inner_text()
         assert first.evaluate("window.__out.length")==0

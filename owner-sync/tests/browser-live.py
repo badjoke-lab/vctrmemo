@@ -19,6 +19,9 @@ with sync_playwright() as p:
         b.locator('#owner-sync-panel').wait_for(timeout=30000)
         b.wait_for_function("""() => document.querySelector('#owner-sync-state').textContent.includes('接続しました')""",timeout=20000)
         assert a.url==b.url
+        # Distinct markers detect an unwanted location.reload after receiving edits.
+        a.evaluate("window.__vctrmemo_page_identity='A'")
+        b.evaluate("window.__vctrmemo_page_identity='B'")
         # Existing local-only workspace is not shared or overwritten.
         for page in (a,b):
             assert page.evaluate("localStorage.getItem('vctrmemo-v2')") is None
@@ -45,27 +48,48 @@ with sync_playwright() as p:
         b.locator('#doc-title').fill('BからAへの更新')
         b.locator('#doc-title').blur()
         a.wait_for_function("""() => document.querySelector('#pages-list').textContent.includes('BからAへの更新')""",timeout=90000)
-        assert a.locator('#doc-title').input_value() == 'BからAへの更新', 'remote reload must preserve the current page'
+        assert a.locator('#doc-title').input_value() == 'BからAへの更新'
+        assert a.evaluate("window.__vctrmemo_page_identity") == 'A', 'receiving a remote edit must not reload browser A'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'publishing must not reload browser B'
+        # A receipt must originate from the peer AFTER it applies the operation.
+        b.wait_for_function(r"""() => /他端末の適用確認 [1-9][0-9]*\//.test(document.querySelector('#owner-sync-state')?.textContent||'')""",timeout=90000)
 
         # Regression: keep the rich text editor focused during several delayed edits.
         first=a.locator('#editor .block-edit').first
         first.fill('さらに入力')
         assert a.evaluate('document.activeElement.isContentEditable'), 'editor must remain focused'
         b.wait_for_function("""() => document.querySelector('#editor .block-edit')?.textContent.includes('さらに入力')""",timeout=50000)
-        a.wait_for_timeout(2200)
+        # Plain Enter stays in the SAME text block, as in a normal editor.
         first.press('Enter')
+        first.type('同じブロック内の改行')
+        assert a.locator('#editor .block-edit').count()==1, 'plain Enter may not create the next text block'
+        assert '同じブロック内の改行' in first.inner_text()
+        b.wait_for_function("""() => document.querySelector('#editor .block-edit')?.textContent.includes('同じブロック内の改行')""",timeout=50000)
+        # Enter while Japanese IME is composing also must not create a block.
+        composition=a.evaluate("""() => {
+          const e=document.querySelector('#editor .block-edit'),before=document.querySelectorAll('#editor .block-edit').length;
+          e.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+          const event=new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true});
+          const defaultAllowed=e.dispatchEvent(event);
+          e.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
+          return {before,after:document.querySelectorAll('#editor .block-edit').length,defaultAllowed};
+        }""")
+        assert composition['before']==composition['after'] and composition['defaultAllowed'],composition
+        a.wait_for_timeout(2200)
+        first.press('Control+Enter')
         second=a.locator('#editor .block-edit').nth(1)
         second.fill('入力をさらに行った')
         assert a.evaluate('document.activeElement.isContentEditable'), 'new line still focused'
         b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('入力をさらに行った'))""",timeout=50000)
         a.wait_for_timeout(2200)
-        second.press('Enter')
+        second.press('Control+Enter')
         third=a.locator('#editor .block-edit').nth(2)
         third.fill('同期できるか')
         assert a.evaluate('document.activeElement.isContentEditable'), 'third line still focused'
         b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('同期できるか'))""",timeout=50000)
         assert a.locator('#doc-title').input_value() == 'BからAへの更新'
         assert b.locator('#doc-title').input_value() == 'BからAへの更新'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'receiving focused-editor blocks must not reload browser B'
         print('FOCUSED EDITOR: three text blocks sent without leaving contenteditable PASS',flush=True)
 
         # Pause is explicit; pressing the same button again resumes without reload.
@@ -74,9 +98,22 @@ with sync_playwright() as p:
         a.locator('#doc-title').fill('オフライン後の追いつき')
         a.locator('#doc-title').blur()
         assert 'オフライン後の追いつき' not in b.locator('#pages-list').inner_text()
-        b.locator('#owner-disconnect').click()
-        b.wait_for_function("""() => document.querySelector('#doc-title')?.value === 'オフライン後の追いつき'""",timeout=90000)
+        # Keep an editor actively focused before reconnect. Rejoin may no
+        # longer wait for a blur, tap elsewhere or a manual page reload.
+        focused=b.locator('#editor .block-edit').first
+        focused.click()
+        assert b.evaluate('document.activeElement.isContentEditable')
+        b.evaluate("document.querySelector('#owner-disconnect').click()")
+        assert b.evaluate('document.activeElement.isContentEditable'), 'reconnect must not blur input'
+        b.wait_for_function("""() => document.querySelector('#doc-title')?.value === 'オフライン後の追いつき'""",timeout=40000)
+        assert b.evaluate('document.activeElement.isContentEditable'), 'incoming title must preserve active block and caret'
         assert b.locator('#owner-disconnect').inner_text() == '同期を停止'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'reconnect must not force reload'
+        # A second remote block update also has to appear while B remains focused.
+        a.locator('#editor .block-edit').nth(1).fill('再開後もフォーカスを外さない')
+        b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('再開後もフォーカスを外さない'))""",timeout=40000)
+        assert b.evaluate('document.activeElement.isContentEditable'), 'remote block must not need blur'
+        print('RECONNECT WHILE FOCUSED: resumed title and text delivered without blur or reload PASS',flush=True)
         # Manual reload should keep the same opened document on both browsers.
         b.reload(wait_until='domcontentloaded')
         b.locator('#owner-sync-panel').wait_for(timeout=30000)
@@ -85,8 +122,90 @@ with sync_playwright() as p:
         a.locator('#owner-sync-panel').wait_for(timeout=30000)
         assert a.locator('#doc-title').input_value() == 'オフライン後の追いつき'
         assert b.locator('#editor .block-edit').nth(2).inner_text() == '同期できるか'
+        assert a.locator('#editor .block-edit').nth(1).inner_text() == '再開後もフォーカスを外さない'
         assert a.url==b.url,'private-link fragment remains stable across reload'
-        print('browser owner LIVE RELAY: A→B and B→A, delayed text edits without blur, pause/resume, catchup, and page restoration PASS',flush=True)
+        # Regression: high-frequency input generates 120 distinct committed edits
+        # without leaving the input or manually refreshing the receiver.
+        a.evaluate("window.__vctrmemo_page_identity='after-stress-A'")
+        b.evaluate("window.__vctrmemo_page_identity='after-stress-B'")
+        stress=a.evaluate("""() => {
+          const key=window.__vctrmemo_owner_storage_key;
+          const before=new Set(JSON.parse(localStorage.getItem(key)).sync.ops.map(op=>op.id));
+          const title=document.querySelector('#doc-title');
+          title.focus();
+          for(let i=0;i<120;i++){
+            title.value='連続入力 '+i;
+            title.dispatchEvent(new Event('input',{bubbles:true}));
+          }
+          const saved=JSON.parse(localStorage.getItem(key)).sync.ops;
+          return {ids:saved.filter(op=>!before.has(op.id)).map(op=>op.id),value:title.value};
+        }""")
+        assert len(stress['ids'])==120, 'all 120 input events must be committed to local storage'
+        try:
+            b.wait_for_function("""expected => {
+              const ops=JSON.parse(localStorage.getItem(window.__vctrmemo_owner_storage_key)).sync.ops;
+              const ids=new Set(ops.map(op=>op.id));
+              return expected.ids.every(id=>ids.has(id))
+                && document.querySelector('#doc-title')?.value===expected.value;
+            }""",arg=stress,timeout=65000)
+        except Exception:
+            for name,page in [('A',a),('B',b)]:
+                diagnostic=page.evaluate("""expected => {
+                  const key=window.__vctrmemo_owner_storage_key;
+                  const stored=JSON.parse(localStorage.getItem(key));
+                  const known=new Set(stored.sync.ops.map(op=>op.id));
+                  return {
+                    totalOps:stored.sync.ops.length,
+                    missingExpected:expected.ids.filter(id=>!known.has(id)),
+                    title:document.querySelector('#doc-title')?.value,
+                    syncStatus:document.querySelector('#owner-sync-state')?.textContent,
+                    missingPredecessors:(new VctrSync.Engine(stored.sync.ops,stored.sync.actor,stored.sync.counter)).missingPredecessors().length
+                  };
+                }""",stress)
+                print('STRESS TIMEOUT DIAGNOSTIC',name,diagnostic,flush=True)
+            raise
+        assert a.evaluate("window.__vctrmemo_page_identity") == 'after-stress-A'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'after-stress-B'
+        assert a.locator('#doc-title').input_value() == stress['value']
+        assert b.locator('#doc-title').input_value() == stress['value']
+        # On Android-sized screens the formerly fixed owner-sync section
+        # covered block 3 and everything below. It must be in document flow,
+        # collapsed by default, and never intercept the third editable block.
+        b.set_viewport_size({'width':390,'height':844})
+        b.reload(wait_until='domcontentloaded')
+        b.locator('#owner-sync-panel').wait_for(timeout=30000)
+        assert not b.locator('#owner-sync-panel details').evaluate('(e)=>e.open'), 'mobile sync panel must start collapsed'
+        metrics=b.evaluate("""() => {
+          const p=document.querySelector('#owner-sync-panel');
+          const main=document.querySelector('main.main');
+          const content=document.querySelector('#content-area');
+          return {
+            position:getComputedStyle(p).position,
+            panelBeforeEditor:p.compareDocumentPosition(content)&Node.DOCUMENT_POSITION_FOLLOWING,
+            insideMain:p.parentElement===main,
+            viewport:innerWidth
+          };
+        }""")
+        assert metrics['viewport']==390
+        assert metrics['position']=='static',metrics
+        assert metrics['insideMain'] and metrics['panelBeforeEditor'],metrics
+        b.locator('#owner-sync-panel summary').click()
+        assert b.locator('#owner-copy-link').is_visible(),'expanded mobile controls must work'
+        b.locator('#owner-sync-panel summary').click()
+        third=b.locator('#editor .block-edit').nth(2)
+        third.scroll_into_view_if_needed()
+        accessibility=b.evaluate("""() => {
+          const e=document.querySelectorAll('#editor .block-edit')[2];
+          const r=e.getBoundingClientRect();
+          const x=r.left+Math.min(25,r.width/2);
+          const y=r.top+r.height/2;
+          return {point:{x,y},accessible:e===document.elementFromPoint(x,y)||e.contains(document.elementFromPoint(x,y)),text:e.textContent};
+        }""")
+        assert accessibility['accessible'],accessibility
+        assert '同期できるか' in accessibility['text'],accessibility
+        print('MOBILE LAYOUT: sync controls in normal document flow; 3rd text block is visible and tappable PASS',flush=True)
+        print('LIVE STRESS: 120 rapid title edits persisted and delivered without blur or reload PASS',flush=True)
+        print('browser owner LIVE RELAY: in-place A→B and B→A, confirmed peer application, focused edits, pause/resume and page restoration PASS',flush=True)
         a.close();b.close();ca.close();cb.close()
     finally:
         browser.close()
