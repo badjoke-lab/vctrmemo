@@ -23,6 +23,9 @@ document.head.append(style);document.body.append(panel);
 const $=id=>document.getElementById(id),status=t=>{$('owner-sync-state').textContent=t};
 let client=null,period=null,flushing=false,publishing=false,pending=[],published=new Set(),room='',stopped=false,connecting=false;
 let deviceId='',receiptsQueued=new Set(),receiptsSent=new Set(),receiptsByPeer=new Map(),receipting=false;
+let resendCursor=0,lastResendAt=0;
+const lastReceiptAt=new Map();
+const peerConfirmed=id=>[...receiptsByPeer.values()].some(ids=>ids.has(id));
 const receiptKey=()=> 'vctrmemo-owner-receipts-'+room;
 function saveReceipts(){localStorage.setItem(receiptKey(),JSON.stringify([...receiptsSent].slice(-12000)));}
 function queueReceipt(ids){
@@ -42,7 +45,7 @@ async function flushReceipts(){
   const ids=[...receiptsQueued].slice(0,20);
   try{
     await client.publish({type:'applied-v1',device:deviceId,ids});
-    ids.forEach(id=>{receiptsQueued.delete(id);receiptsSent.add(id);});
+    ids.forEach(id=>{receiptsQueued.delete(id);receiptsSent.add(id);lastReceiptAt.set(id,Date.now());});
     saveReceipts();
   }catch(err){console.warn('Owner-sync receipt retry pending',err);}
   finally{receipting=false;}
@@ -70,10 +73,19 @@ async function flushRemote(){
     // not merely that a relay accepted the ciphertext. Missing predecessors
     // must be recovered before claiming a complete application.
     if(!detail.missing){
-      const actor=readStorage(localStorage,STORAGE).sync.actor;
-      // Deterministic i_ seed operations already exist on both fresh clients;
-      // receipt flooding them delays real text edits and does not prove user content.
-      queueReceipt(batch.filter(op=>op.id.startsWith('a_')&&!op.id.startsWith('a_'+actor+'_')).map(op=>op.id));
+      const saved=readStorage(localStorage,STORAGE).sync;
+      const localPrefix='a_'+saved.actor+'_';
+      // When an out-of-order predecessor finally arrives, acknowledge ALL
+      // recovered peer operations, not only those from the final relay packet.
+      queueReceipt(saved.ops.filter(op=>op.id.startsWith('a_')&&!op.id.startsWith(localPrefix)).map(op=>op.id));
+      // If our earlier receipt was lost, respond again to a retransmitted op.
+      for(const op of batch){
+        if(!op.id.startsWith('a_')||op.id.startsWith(localPrefix)||!receiptsSent.has(op.id))continue;
+        if(Date.now()-(lastReceiptAt.get(op.id)||0)<6000)continue;
+        receiptsSent.delete(op.id);
+        lastReceiptAt.set(op.id,Date.now());
+        queueReceipt([op.id]);
+      }
     }
     status(detail.missing?'受信した変更を端末に保存・履歴不足 '+detail.missing+'件':'受信した変更を端末に保存・画面を更新しました');
   }catch(err){
@@ -107,7 +119,18 @@ async function tick(){
   const unsent=stored.sync.ops.filter(op=>Sync.isValidOp(op)&&!published.has(op.id));
   // Fresh user edits must not sit behind ~138 built-in initialization fields.
   // Preserve causal order within each class; predecessors can be recovered.
-  const next=[...unsent.filter(op=>op.id.startsWith('a_')),...unsent.filter(op=>!op.id.startsWith('a_'))].slice(0,20);
+  let next=[...unsent.filter(op=>op.id.startsWith('a_')),...unsent.filter(op=>!op.id.startsWith('a_'))].slice(0,20);
+  if(!next.length && Date.now()-lastResendAt>=6000){
+    // A relay OK confirms storage on that relay, NOT delivery to the other
+    // device. Retry unconfirmed local edits in bounded round-robin batches.
+    const prefix='a_'+stored.sync.actor+'_';
+    const unconfirmed=stored.sync.ops.filter(op=>op.id.startsWith(prefix)&&published.has(op.id)&&!peerConfirmed(op.id));
+    if(unconfirmed.length){
+      next=Array.from({length:Math.min(20,unconfirmed.length)},(_,i)=>unconfirmed[(resendCursor+i)%unconfirmed.length]);
+      resendCursor=(resendCursor+next.length)%unconfirmed.length;
+      lastResendAt=Date.now();
+    }
+  }
   if(!next.length)return;
   publishing=true;
   try{
@@ -134,6 +157,7 @@ async function connect(){
     const priorReceipts=JSON.parse(localStorage.getItem(receiptKey())||'[]');
     receiptsSent=new Set(Array.isArray(priorReceipts)?priorReceipts:[]);
     receiptsQueued=new Set();receiptsByPeer=new Map();
+    resendCursor=0;lastResendAt=Date.now();lastReceiptAt.clear();
     const saved=JSON.parse(localStorage.getItem('vctrmemo-owner-published-'+room)||'[]');
     published=new Set(Array.isArray(saved)?saved:[]);
     instance.start();client=instance;
