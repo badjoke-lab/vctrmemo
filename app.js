@@ -765,6 +765,63 @@
   $('sync-now').addEventListener('click',()=>{
     toast('チャット共有は安全な権限・保存領域の分離が完成するまで利用できません。');
   });
+  // Remote changes can update a focused editor without waiting for blur.
+  // Capture and restore its logical position; do not steal focus or viewport.
+  function ownerActiveCaret(){
+    const active=document.activeElement;
+    if(!active)return null;
+    if(active.id==='doc-title'){
+      return {kind:'title',start:active.selectionStart||0,end:active.selectionEnd||0,direction:active.selectionDirection||'none'};
+    }
+    if(active.classList?.contains('block-edit')){
+      const row=active.closest('.block-row'),index=[...document.querySelectorAll('#editor .block-row')].indexOf(row);
+      if(index<0)return null;
+      const range=window.getSelection();
+      let start=0,end=0;
+      if(range&&range.rangeCount){
+        const r=range.getRangeAt(0);
+        if(active.contains(r.startContainer)){
+          const before=document.createRange();before.selectNodeContents(active);before.setEnd(r.startContainer,r.startOffset);
+          start=before.toString().length;
+        }
+        if(active.contains(r.endContainer)){
+          const before=document.createRange();before.selectNodeContents(active);before.setEnd(r.endContainer,r.endOffset);
+          end=before.toString().length;
+        }else end=start;
+      }
+      return {kind:'block',index,start,end};
+    }
+    return null;
+  }
+  function ownerRestoreCaret(caret){
+    if(!caret)return;
+    const active=caret.kind==='title'?$('doc-title'):document.querySelectorAll('#editor .block-edit')[caret.index];
+    if(!active)return;
+    active.focus({preventScroll:true});
+    if(caret.kind==='title'){
+      active.setSelectionRange(Math.min(caret.start,active.value.length),Math.min(caret.end,active.value.length),caret.direction);
+      return;
+    }
+    const selection=window.getSelection();
+    if(!selection)return;
+    const walker=document.createTreeWalker(active,NodeFilter.SHOW_TEXT);
+    const locate=n=>{
+      let text,total=0,last=null;
+      while(text=walker.nextNode()){
+        last=text;
+        if(total+text.length>=n)return {node:text,offset:n-total};
+        total+=text.length;
+      }
+      return last?{node:last,offset:last.length}:{node:active,offset:0};
+    };
+    const a=locate(caret.start);
+    walker.currentNode=active;
+    const b=locate(caret.end);
+    const range=document.createRange();
+    range.setStart(a.node,a.offset);
+    range.setEnd(b.node,b.offset);
+    selection.removeAllRanges();selection.addRange(range);
+  }
   // The browser-only owner sync must not write localStorage behind this editor.
   // Apply remote operations through the SAME engine that captures keystrokes.
   // A synchronous CustomEvent acts as the application/transport commit boundary.
@@ -794,9 +851,14 @@
         engine=trial;state=projected;baseline=structuredClone(state);
         $('save-state').textContent='● 端末保存済み';
         updateConflictButton();updateSyncState();
-        // No location.reload(): preserve this tab's selected page.
-        // The transport defers dispatch during editing/IME composition.
+        // Render live even while a regular input remains focused.
+        // The transport defers only an active IME composition, so Android's
+        // Japanese text conversion is never interrupted mid-composition.
+        const caret=ownerActiveCaret();
+        const scrollX=window.scrollX,scrollY=window.scrollY;
         render();
+        ownerRestoreCaret(caret);
+        if(caret)window.scrollTo(scrollX,scrollY);
       }
       detail.applied=true;
       detail.missing=engine.missingPredecessors().length;
