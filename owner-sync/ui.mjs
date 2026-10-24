@@ -16,10 +16,25 @@ panel.innerHTML=`<details open><summary>本人の端末間同期（ブラウザ�
 <p id="owner-sync-state" role="status" aria-live="polite">暗号化同期へ接続しています…</p>
 <p class="owner-warning"><strong>専用URLには復号鍵が含まれます。</strong> URLを知った人は閲覧・変更できます。Vectorの<strong>自分宛てNotesだけ</strong>に貼り、他人へ転送しないでください。この実験版はVector内のMini Appではなく、ブラウザで動作します。外部Nostrリレーへ暗号文を保存します。既存の端末内メモは同期・転送されません。</p>
 </details>`;
-Object.assign(panel.style,{position:'fixed',right:'12px',bottom:'12px',zIndex:9000,maxWidth:'min(380px,calc(100vw - 24px))',background:'#15241f',color:'#f2f6f2',border:'1px solid #5c8274',padding:'12px',borderRadius:'12px',font:'13px system-ui',boxShadow:'0 8px 22px #0007'});
+// Place outside #content-area: render() replaces that node's children on edits.
+// On small screens this section belongs in the document flow, never on top of
+// the editable blocks or the Android on-screen keyboard.
+panel.querySelector('details').open=!matchMedia('(max-width:800px)').matches;
 const style=document.createElement('style');
-style.textContent=`#owner-sync-panel summary{cursor:pointer;font-weight:600}#owner-sync-panel p{line-height:1.45;margin:10px 0}#owner-sync-panel button{font:inherit;padding:7px;margin:4px 5px 4px 0;background:#244339;border:1px solid #60806e;color:white;border-radius:5px;cursor:pointer}#owner-sync-panel .owner-warning{font-size:11px;color:#cabb9d}`;
-document.head.append(style);document.body.append(panel);
+style.textContent=`#owner-sync-panel{position:fixed;right:12px;bottom:12px;z-index:9000;max-width:min(380px,calc(100vw - 24px));background:#15241f;color:#f2f6f2;border:1px solid #5c8274;padding:12px;border-radius:12px;font:13px system-ui;box-shadow:0 8px 22px #0007}
+#owner-sync-panel summary{cursor:pointer;font-weight:600}
+#owner-sync-panel p{line-height:1.45;margin:10px 0}
+#owner-sync-panel button{font:inherit;padding:7px;margin:4px 5px 4px 0;background:#244339;border:1px solid #60806e;color:white;border-radius:5px;cursor:pointer}
+#owner-sync-panel .owner-warning{font-size:11px;color:#cabb9d}
+@media(max-width:800px){
+  #owner-sync-panel{position:static;max-width:none;width:auto;z-index:auto;margin:10px 16px 0;padding:10px 12px;box-shadow:none}
+  #owner-sync-panel summary{min-height:28px;display:list-item;line-height:28px}
+  #owner-sync-panel button{max-width:100%;white-space:normal}
+}`;
+document.head.append(style);
+const main=document.querySelector('main.main'),content=document.getElementById('content-area');
+if(!main||!content)throw Error('Owner-sync layout unavailable');
+main.insertBefore(panel,content);
 const $=id=>document.getElementById(id),status=t=>{$('owner-sync-state').textContent=t};
 let client=null,period=null,flushing=false,publishing=false,pending=[],published=new Set(),room='',stopped=false,connecting=false;
 let deviceId='',receiptsQueued=new Set(),receiptsSent=new Set(),receiptsByPeer=new Map(),receipting=false;
