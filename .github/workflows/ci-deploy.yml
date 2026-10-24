@@ -61,6 +61,46 @@ jobs:
         run: python scripts/build.py
       - name: Bundle browser-only owner sync module
         run: ./node_modules/.bin/esbuild owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=dist/site/owner-sync.js
+      # Main remains the stable site. The experimental browser candidate gets
+      # an independent URL, relay identity and localStorage namespace.
+      - name: Check out tested sync candidate for isolated preview
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@v4
+        with:
+          ref: 6a8bef7ab428d2d03e90b1b64f6be6b1bd3f4ee9
+          path: owner-candidate
+          persist-credentials: false
+      - name: Build isolated owner-sync release candidate
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          python owner-candidate/scripts/build.py
+          ./node_modules/.bin/esbuild owner-candidate/owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=owner-candidate/dist/site/owner-sync.js
+          mkdir -p dist/site/rc
+          rsync -a --exclude='*.xdc' owner-candidate/dist/site/ dist/site/rc/
+          python - <<'PY'
+          from pathlib import Path
+          base=Path('dist/site/rc')
+          boot=base/'synced/link-bootstrap.mjs'
+          source=boot.read_text(encoding='utf-8')
+          source_key="'vctrmemo:scoped-local:v1:'+secret"
+          assert source.count(source_key)==1
+          source=source.replace(source_key, "'vctrmemo:scoped-local:rc:v1:'+secret")
+          assert source.count('window.__vctrmemo_owner_secret=secret;')==1
+          source=source.replace('window.__vctrmemo_owner_secret=secret;',
+            "window.__vctrmemo_owner_secret=hex(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('vctrmemo:rc:v1:'+secret))));")
+          boot.write_text(source,encoding='utf-8')
+          page=base/'synced/index.html'
+          html=page.read_text(encoding='utf-8')
+          label='<div role="note" style="position:fixed;top:0;right:0;z-index:20005;background:#6b320b;color:#fff;padding:5px 10px;font:12px system-ui">vctrmemo 同期修正版・テスト専用</div>'
+          assert html.count('</body>')==1
+          page.write_text(html.replace('</body>',label+'\n</body>'),encoding='utf-8')
+          assert (base/'owner-sync.js').exists()
+          assert (base/'synced/app.js').exists()
+          assert (base/'synced/link-bootstrap.mjs').exists()
+          assert not list(base.rglob('*.xdc'))
+          assert 'vctrmemo:rc:v1:' in boot.read_text()
+          print('ISOLATED RC: dist/site/rc/synced/ is separate from /synced/ and XDC')
+          PY
       - name: Verify owner sync stays out of WebXDC
         run: python owner-sync/tests/package.test.py
       - name: Verify bundle and preview
