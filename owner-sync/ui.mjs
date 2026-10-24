@@ -39,6 +39,8 @@ const $=id=>document.getElementById(id),status=t=>{$('owner-sync-state').textCon
 let client=null,period=null,flushing=false,publishing=false,pending=[],published=new Set(),room='',stopped=false,connecting=false;
 let deviceId='',receiptsQueued=new Set(),receiptsSent=new Set(),receiptsByPeer=new Map(),receipting=false;
 let resendCursor=0,lastResendAt=0,lastNeedAt=0,repairing=false,asking=false;
+let composing=false,replayReplying=false;
+const replayRequests=new Map();
 const lastReceiptAt=new Map();
 const peerConfirmed=id=>[...receiptsByPeer.values()].some(ids=>ids.has(id));
 const receiptKey=()=> 'vctrmemo-owner-receipts-'+room;
@@ -102,13 +104,33 @@ async function respondMissing(ids){
   }catch(err){console.warn('Owner-sync history repair reply failed',err);}
   finally{repairing=false;}
 }
-const editing=()=>{
-  const a=document.activeElement;
-  return a&&((a.isContentEditable)||(['INPUT','TEXTAREA'].includes(a.tagName)));
-};
+// A focused field is not an unfinished edit. Waiting for blur caused
+// "sync resumes only after I tap elsewhere" on Android and desktop.
+document.addEventListener('compositionstart',()=>{composing=true;},true);
+document.addEventListener('compositionend',()=>{composing=false;setTimeout(flushRemote,0);},true);
+async function announceRejoin(){
+  if(!client||stopped)return;
+  try{await client.publish({type:'rejoin-v1',device:deviceId});}
+  catch(err){console.warn('Owner-sync rejoin request will be retried by relay/history recovery',err);}
+}
+async function replayRecentTo(device){
+  if(!client||stopped||replayReplying||device===deviceId)return;
+  // Rate-limit unsolicited peer catch-up and never echo a replay response.
+  if(Date.now()-(replayRequests.get(device)||0)<10000)return;
+  replayRequests.set(device,Date.now());
+  replayReplying=true;
+  try{
+    const sync=readStorage(localStorage,STORAGE).sync;
+    const prefix='a_'+sync.actor+'_';
+    // The tail establishes missing-predecessor links to older offline edits.
+    const own=sync.ops.filter(op=>op.id.startsWith(prefix)).slice(-40);
+    for(let i=0;i<own.length;i+=20)await client.publishBatch(own.slice(i,i+20));
+  }catch(err){console.warn('Owner-sync reconnect history replay failed',err);}
+  finally{replayReplying=false;}
+}
 function savePublished(){localStorage.setItem('vctrmemo-owner-published-'+room,JSON.stringify([...published].slice(-12000)));}
 async function flushRemote(){
-  if(stopped||flushing||!pending.length||editing())return;
+  if(stopped||flushing||!pending.length||composing)return;
   flushing=true;
   try{
     // App.js is the ONLY writer of workspace operations. Applying a relay
@@ -146,6 +168,10 @@ async function flushRemote(){
   }finally{flushing=false;}
 }
 function inbound(payload){
+  if(payload?.type==='rejoin-v1'){
+    if(typeof payload.device==='string'&&/^[a-f0-9-]{36}$/.test(payload.device))void replayRecentTo(payload.device);
+    return;
+  }
   if(payload?.type==='need-v1'){
     if(payload.device!==deviceId && validIds(payload.ids))void respondMissing(payload.ids);
     return;
@@ -163,7 +189,7 @@ function inbound(payload){
   const changes=payload?.batch===undefined?[payload]:payload.batch;
   if(!Array.isArray(changes)||changes.length<1||changes.length>20||!changes.every(Sync.isValidOp))return;
   // Persist first, then mark as acknowledged. Reject entire malformed batch.
-  pending.push(...changes);setTimeout(flushRemote,250);
+  pending.push(...changes);setTimeout(flushRemote,0);
 }
 async function tick(){
   if(!client||stopped)return;
@@ -171,8 +197,8 @@ async function tick(){
   if(publishing)return;
   await flushRemote();
   void flushReceipts(); // peer acknowledgements must never block unsent edits
-  // Sending local, already-persisted operations must NEVER wait for focus to leave
-  // a contenteditable. Incoming merges/reloads remain deferred until editing ends.
+  // Both local sending and incoming merges can occur with a focused editor;
+  // only an active IME composition suspends incoming DOM updates.
   let stored;
   try{stored=readStorage(localStorage,STORAGE);}catch(err){status(err.message);return;}
   const unsent=stored.sync.ops.filter(op=>Sync.isValidOp(op)&&!published.has(op.id));
@@ -216,12 +242,15 @@ async function connect(){
     const priorReceipts=JSON.parse(localStorage.getItem(receiptKey())||'[]');
     receiptsSent=new Set(Array.isArray(priorReceipts)?priorReceipts:[]);
     receiptsQueued=new Set();receiptsByPeer=new Map();
-    resendCursor=0;lastResendAt=Date.now();lastNeedAt=0;asking=false;repairing=false;lastReceiptAt.clear();
+    resendCursor=0;lastResendAt=Date.now();lastNeedAt=0;asking=false;repairing=false;lastReceiptAt.clear();replayRequests.clear();
     const saved=JSON.parse(localStorage.getItem('vctrmemo-owner-published-'+room)||'[]');
     published=new Set(Array.isArray(saved)?saved:[]);
     instance.start();client=instance;
     status('暗号化同期に接続しました。ほかの端末も同じURLで開いてください。');
     period=setInterval(tick,1200);
+    // A reconnect actively asks the still-online peer to replay recent edits
+    // rather than waiting for the relay's old-event subscription/history.
+    void announceRejoin();
     await tick();
   }catch(err){status('接続エラー: '+err.message);console.error(err);}
   finally{connecting=false;}
@@ -244,5 +273,5 @@ $('owner-disconnect').onclick=()=>{
   $('owner-disconnect').textContent='同期を再開';
   status('同期を一時停止中です。再開するには「同期を再開」を押してください。');
 };
-document.addEventListener('focusout',()=>setTimeout(flushRemote,200));
+document.addEventListener('focusout',()=>setTimeout(flushRemote,0));
 connect();
