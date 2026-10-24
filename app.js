@@ -276,7 +276,7 @@
     actions.append(button('削除' ,'subtle-button danger',()=>{if(!confirm('このページを削除しますか？ JSONバックアップがない場合、復元できません。'))return;page.deleted=true;touchPage(page);setView('home');}));top.append(title,actions);root.append(top);
     const backlinks=livePages().filter(p=>p.id!==page.id && p.blocks.some(b=>b.type==='link'&&b.targetId===page.id));
     if(backlinks.length){const related=document.createElement('div');related.className='backlinks';related.append(document.createTextNode('このページへのリンク: '));for(const p of backlinks)related.append(button(p.title||'無題','subtle-button',()=>setView(p.id)));root.append(related);}
-    const hint=document.createElement('p');hint.className='doc-hint';hint.textContent='入力は自動保存されます。Enterで新しいブロック、Shift+Enterで改行。';root.append(hint);
+    const hint=document.createElement('p');hint.className='doc-hint';hint.textContent='自動保存。Enterで改行、Ctrl＋Enter（Macは⌘＋Enter）で新しいブロック。';root.append(hint);
     const editor=document.createElement('div');editor.className='editor';editor.id='editor';root.append(editor);
     renderBlocks(editor,page);
   }
@@ -342,10 +342,33 @@
       }
       const edit=document.createElement('div');edit.className='block-edit '+(block.type==='text'?'':block.type);edit.contentEditable='true';edit.textContent=block.text;edit.setAttribute('role','textbox');edit.setAttribute('aria-multiline','true');edit.dataset.placeholder=block.type==='text'?'入力を開始…':'内容を入力…';
       if(block.checked){edit.style.textDecoration='line-through';edit.style.color='#687d71';}
-      edit.addEventListener('input',()=>{block.text=edit.innerText.replace(/\r/g,'').slice(0,30000);touchPage(page);});
+      let composing=false;
+      const saveEditorText=()=>{
+        block.text=edit.innerText.replace(/\r/g,'').slice(0,30000);
+        touchPage(page);
+      };
+      // IME conversion is not a paragraph boundary. Some browsers report an
+      // Enter keydown with keyCode 229 while composing Japanese candidates.
+      // Do not persist unfinished conversion candidates as separate versions.
+      edit.addEventListener('compositionstart',()=>{composing=true;});
+      edit.addEventListener('compositionend',()=>{composing=false;saveEditorText();});
+      edit.addEventListener('input',()=>{if(!composing)saveEditorText();});
       edit.addEventListener('keydown',e=>{
-        if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const next=makeBlock();page.blocks.splice(page.blocks.findIndex(b=>b.id===block.id)+1,0,next);touchPage(page);renderBlocks(editor,page);focusBlock(next.id);}
-        if(e.key==='Backspace' && !edit.innerText && page.blocks.length>1){e.preventDefault();const idx=page.blocks.findIndex(b=>b.id===block.id);page.blocks.splice(idx,1);touchPage(page);renderBlocks(editor,page);focusBlock(page.blocks[Math.max(0,idx-1)].id);}
+        if(e.isComposing||composing||e.keyCode===229||e.which===229)return;
+        // Default Enter/Shift+Enter creates an ordinary newline IN this block.
+        // Explicit Ctrl/Cmd+Enter or the existing ＋ button creates a block.
+        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)&&!e.shiftKey){
+          e.preventDefault();
+          const next=makeBlock();
+          page.blocks.splice(page.blocks.findIndex(b=>b.id===block.id)+1,0,next);
+          touchPage(page);renderBlocks(editor,page);focusBlock(next.id);
+          return;
+        }
+        if(e.key==='Backspace' && !edit.innerText && page.blocks.length>1){
+          e.preventDefault();const idx=page.blocks.findIndex(b=>b.id===block.id);
+          page.blocks.splice(idx,1);touchPage(page);renderBlocks(editor,page);
+          focusBlock(page.blocks[Math.max(0,idx-1)].id);
+        }
       });
       row.append(edit);editor.append(row);
       if(pickerFor===block.id)editor.append(blockPicker(editor,page,i+1));
