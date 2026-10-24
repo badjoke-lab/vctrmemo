@@ -59,14 +59,30 @@ with sync_playwright() as p:
         first.fill('さらに入力')
         assert a.evaluate('document.activeElement.isContentEditable'), 'editor must remain focused'
         b.wait_for_function("""() => document.querySelector('#editor .block-edit')?.textContent.includes('さらに入力')""",timeout=50000)
-        a.wait_for_timeout(2200)
+        # Plain Enter stays in the SAME text block, as in a normal editor.
         first.press('Enter')
+        first.type('同じブロック内の改行')
+        assert a.locator('#editor .block-edit').count()==1, 'plain Enter may not create the next text block'
+        assert '同じブロック内の改行' in first.inner_text()
+        b.wait_for_function("""() => document.querySelector('#editor .block-edit')?.textContent.includes('同じブロック内の改行')""",timeout=50000)
+        # Enter while Japanese IME is composing also must not create a block.
+        composition=a.evaluate("""() => {
+          const e=document.querySelector('#editor .block-edit'),before=document.querySelectorAll('#editor .block-edit').length;
+          e.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+          const event=new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true});
+          const defaultAllowed=e.dispatchEvent(event);
+          e.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
+          return {before,after:document.querySelectorAll('#editor .block-edit').length,defaultAllowed};
+        }""")
+        assert composition['before']==composition['after'] and composition['defaultAllowed'],composition
+        a.wait_for_timeout(2200)
+        first.press('Control+Enter')
         second=a.locator('#editor .block-edit').nth(1)
         second.fill('入力をさらに行った')
         assert a.evaluate('document.activeElement.isContentEditable'), 'new line still focused'
         b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('入力をさらに行った'))""",timeout=50000)
         a.wait_for_timeout(2200)
-        second.press('Enter')
+        second.press('Control+Enter')
         third=a.locator('#editor .block-edit').nth(2)
         third.fill('同期できるか')
         assert a.evaluate('document.activeElement.isContentEditable'), 'third line still focused'
