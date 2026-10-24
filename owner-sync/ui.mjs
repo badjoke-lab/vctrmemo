@@ -23,7 +23,7 @@ document.head.append(style);document.body.append(panel);
 const $=id=>document.getElementById(id),status=t=>{$('owner-sync-state').textContent=t};
 let client=null,period=null,flushing=false,publishing=false,pending=[],published=new Set(),room='',stopped=false,connecting=false;
 let deviceId='',receiptsQueued=new Set(),receiptsSent=new Set(),receiptsByPeer=new Map(),receipting=false;
-let resendCursor=0,lastResendAt=0;
+let resendCursor=0,lastResendAt=0,lastNeedAt=0,repairing=false,asking=false;
 const lastReceiptAt=new Map();
 const peerConfirmed=id=>[...receiptsByPeer.values()].some(ids=>ids.has(id));
 const receiptKey=()=> 'vctrmemo-owner-receipts-'+room;
@@ -49,6 +49,43 @@ async function flushReceipts(){
     saveReceipts();
   }catch(err){console.warn('Owner-sync receipt retry pending',err);}
   finally{receipting=false;}
+}
+const validIds=ids=>Array.isArray(ids)&&ids.length>0&&ids.length<=20&&ids.every(id=>typeof id==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(id));
+async function requestMissing(){
+  if(!client||stopped||asking||Date.now()-lastNeedAt<5000)return;
+  let missing;
+  try{
+    const stored=readStorage(localStorage,STORAGE).sync;
+    missing=new Sync.Engine(stored.ops,stored.actor,stored.counter).missingPredecessors();
+  }catch(err){console.warn('Cannot inspect owner-sync missing history',err);return;}
+  if(!missing.length)return;
+  asking=true;lastNeedAt=Date.now();
+  try{await client.publish({type:'need-v1',device:deviceId,ids:missing.slice(0,20)});}
+  catch(err){console.warn('Owner-sync history repair request failed',err);}
+  finally{asking=false;}
+}
+async function respondMissing(ids){
+  if(!client||stopped||repairing||!validIds(ids))return;
+  repairing=true;
+  try{
+    const sync=readStorage(localStorage,STORAGE).sync;
+    const byId=new Map(sync.ops.map(op=>[op.id,op]));
+    // Include the requested predecessors AND preceding chain; a single
+    // lost relay event often contains 20 consecutive text mutations.
+    const queue=ids.slice(),ops=[],seen=new Set();
+    for(let i=0;i<queue.length&&ops.length<80;i++){
+      const id=queue[i];
+      if(seen.has(id))continue;
+      seen.add(id);
+      const op=byId.get(id);
+      if(!op)continue;
+      ops.push(op);
+      for(const predecessor of op.pred||[])if(!seen.has(predecessor))queue.push(predecessor);
+    }
+    ops.reverse();
+    for(let i=0;i<ops.length;i+=20)await client.publishBatch(ops.slice(i,i+20));
+  }catch(err){console.warn('Owner-sync history repair reply failed',err);}
+  finally{repairing=false;}
 }
 const editing=()=>{
   const a=document.activeElement;
@@ -87,12 +124,17 @@ async function flushRemote(){
         queueReceipt([op.id]);
       }
     }
-    status(detail.missing?'受信した変更を端末に保存・履歴不足 '+detail.missing+'件':'受信した変更を端末に保存・画面を更新しました');
+    if(detail.missing)void requestMissing();
+    status(detail.missing?'受信した変更を端末に保存・履歴不足 '+detail.missing+'件（修復要求中）':'受信した変更を端末に保存・画面を更新しました');
   }catch(err){
     status('受信処理を保留: '+err.message);console.error(err);
   }finally{flushing=false;}
 }
 function inbound(payload){
+  if(payload?.type==='need-v1'){
+    if(payload.device!==deviceId && validIds(payload.ids))void respondMissing(payload.ids);
+    return;
+  }
   if(payload?.type==='applied-v1'){
     if(typeof payload.device!=='string'||!/^[a-f0-9-]{36}$/.test(payload.device)||!Array.isArray(payload.ids)||payload.ids.length>20||payload.ids.some(id=>typeof id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(id)))return;
     if(payload.device!==deviceId){
@@ -109,7 +151,9 @@ function inbound(payload){
   pending.push(...changes);setTimeout(flushRemote,250);
 }
 async function tick(){
-  if(!client||publishing||stopped)return;
+  if(!client||stopped)return;
+  void requestMissing();
+  if(publishing)return;
   await flushRemote();
   void flushReceipts(); // peer acknowledgements must never block unsent edits
   // Sending local, already-persisted operations must NEVER wait for focus to leave
@@ -157,7 +201,7 @@ async function connect(){
     const priorReceipts=JSON.parse(localStorage.getItem(receiptKey())||'[]');
     receiptsSent=new Set(Array.isArray(priorReceipts)?priorReceipts:[]);
     receiptsQueued=new Set();receiptsByPeer=new Map();
-    resendCursor=0;lastResendAt=Date.now();lastReceiptAt.clear();
+    resendCursor=0;lastResendAt=Date.now();lastNeedAt=0;asking=false;repairing=false;lastReceiptAt.clear();
     const saved=JSON.parse(localStorage.getItem('vctrmemo-owner-published-'+room)||'[]');
     published=new Set(Array.isArray(saved)?saved:[]);
     instance.start();client=instance;
