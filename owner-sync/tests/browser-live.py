@@ -139,6 +139,42 @@ with sync_playwright() as p:
         assert b.evaluate("window.__vctrmemo_page_identity") == 'after-stress-B'
         assert a.locator('#doc-title').input_value() == stress['value']
         assert b.locator('#doc-title').input_value() == stress['value']
+        # On Android-sized screens the formerly fixed owner-sync section
+        # covered block 3 and everything below. It must be in document flow,
+        # collapsed by default, and never intercept the third editable block.
+        b.set_viewport_size({'width':390,'height':844})
+        b.reload(wait_until='domcontentloaded')
+        b.locator('#owner-sync-panel').wait_for(timeout=30000)
+        assert not b.locator('#owner-sync-panel details').evaluate('(e)=>e.open'), 'mobile sync panel must start collapsed'
+        metrics=b.evaluate("""() => {
+          const p=document.querySelector('#owner-sync-panel');
+          const main=document.querySelector('main.main');
+          const content=document.querySelector('#content-area');
+          return {
+            position:getComputedStyle(p).position,
+            panelBeforeEditor:p.compareDocumentPosition(content)&Node.DOCUMENT_POSITION_FOLLOWING,
+            insideMain:p.parentElement===main,
+            viewport:innerWidth
+          };
+        }""")
+        assert metrics['viewport']==390
+        assert metrics['position']=='static',metrics
+        assert metrics['insideMain'] and metrics['panelBeforeEditor'],metrics
+        b.locator('#owner-sync-panel summary').click()
+        assert b.locator('#owner-copy-link').is_visible(),'expanded mobile controls must work'
+        b.locator('#owner-sync-panel summary').click()
+        third=b.locator('#editor .block-edit').nth(2)
+        third.scroll_into_view_if_needed()
+        accessibility=b.evaluate("""() => {
+          const e=document.querySelectorAll('#editor .block-edit')[2];
+          const r=e.getBoundingClientRect();
+          const x=r.left+Math.min(25,r.width/2);
+          const y=r.top+r.height/2;
+          return {point:{x,y},accessible:e===document.elementFromPoint(x,y)||e.contains(document.elementFromPoint(x,y)),text:e.textContent};
+        }""")
+        assert accessibility['accessible'],accessibility
+        assert '同期できるか' in accessibility['text'],accessibility
+        print('MOBILE LAYOUT: sync controls in normal document flow; 3rd text block is visible and tappable PASS',flush=True)
         print('LIVE STRESS: 120 rapid title edits persisted and delivered without blur or reload PASS',flush=True)
         print('browser owner LIVE RELAY: in-place A→B and B→A, confirmed peer application, focused edits, pause/resume and page restoration PASS',flush=True)
         a.close();b.close();ca.close();cb.close()
