@@ -95,6 +95,34 @@ with sync_playwright() as p:
         assert a.locator('#doc-title').input_value() == 'オフライン後の追いつき'
         assert b.locator('#editor .block-edit').nth(2).inner_text() == '同期できるか'
         assert a.url==b.url,'private-link fragment remains stable across reload'
+        # Regression: high-frequency input generates 120 distinct committed edits
+        # without leaving the input or manually refreshing the receiver.
+        a.evaluate("window.__vctrmemo_page_identity='after-stress-A'")
+        b.evaluate("window.__vctrmemo_page_identity='after-stress-B'")
+        stress=a.evaluate("""() => {
+          const key=window.__vctrmemo_owner_storage_key;
+          const before=new Set(JSON.parse(localStorage.getItem(key)).sync.ops.map(op=>op.id));
+          const title=document.querySelector('#doc-title');
+          title.focus();
+          for(let i=0;i<120;i++){
+            title.value='連続入力 '+i;
+            title.dispatchEvent(new Event('input',{bubbles:true}));
+          }
+          const saved=JSON.parse(localStorage.getItem(key)).sync.ops;
+          return {ids:saved.filter(op=>!before.has(op.id)).map(op=>op.id),value:title.value};
+        }""")
+        assert len(stress['ids'])==120, 'all 120 input events must be committed to local storage'
+        b.wait_for_function("""expected => {
+          const ops=JSON.parse(localStorage.getItem(window.__vctrmemo_owner_storage_key)).sync.ops;
+          const ids=new Set(ops.map(op=>op.id));
+          return expected.ids.every(id=>ids.has(id))
+            && document.querySelector('#doc-title')?.value===expected.value;
+        }""",arg=stress,timeout=90000)
+        assert a.evaluate("window.__vctrmemo_page_identity") == 'after-stress-A'
+        assert b.evaluate("window.__vctrmemo_page_identity") == 'after-stress-B'
+        assert a.locator('#doc-title').input_value() == stress['value']
+        assert b.locator('#doc-title').input_value() == stress['value']
+        print('LIVE STRESS: 120 rapid title edits persisted and delivered without blur or reload PASS',flush=True)
         print('browser owner LIVE RELAY: in-place A→B and B→A, confirmed peer application, focused edits, pause/resume and page restoration PASS',flush=True)
         a.close();b.close();ca.close();cb.close()
     finally:
