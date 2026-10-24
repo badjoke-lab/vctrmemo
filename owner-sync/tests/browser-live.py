@@ -82,10 +82,22 @@ with sync_playwright() as p:
         a.locator('#doc-title').fill('オフライン後の追いつき')
         a.locator('#doc-title').blur()
         assert 'オフライン後の追いつき' not in b.locator('#pages-list').inner_text()
-        b.locator('#owner-disconnect').click()
-        b.wait_for_function("""() => document.querySelector('#doc-title')?.value === 'オフライン後の追いつき'""",timeout=90000)
+        # Keep an editor actively focused before reconnect. Rejoin may no
+        # longer wait for a blur, tap elsewhere or a manual page reload.
+        focused=b.locator('#editor .block-edit').first
+        focused.click()
+        assert b.evaluate('document.activeElement.isContentEditable')
+        b.evaluate("document.querySelector('#owner-disconnect').click()")
+        assert b.evaluate('document.activeElement.isContentEditable'), 'reconnect must not blur input'
+        b.wait_for_function("""() => document.querySelector('#doc-title')?.value === 'オフライン後の追いつき'""",timeout=40000)
+        assert b.evaluate('document.activeElement.isContentEditable'), 'incoming title must preserve active block and caret'
         assert b.locator('#owner-disconnect').inner_text() == '同期を停止'
         assert b.evaluate("window.__vctrmemo_page_identity") == 'B', 'reconnect must not force reload'
+        # A second remote block update also has to appear while B remains focused.
+        a.locator('#editor .block-edit').nth(1).fill('再開後もフォーカスを外さない')
+        b.wait_for_function("""() => [...document.querySelectorAll('#editor .block-edit')].some(e=>e.textContent.includes('再開後もフォーカスを外さない'))""",timeout=40000)
+        assert b.evaluate('document.activeElement.isContentEditable'), 'remote block must not need blur'
+        print('RECONNECT WHILE FOCUSED: resumed title and text delivered without blur or reload PASS',flush=True)
         # Manual reload should keep the same opened document on both browsers.
         b.reload(wait_until='domcontentloaded')
         b.locator('#owner-sync-panel').wait_for(timeout=30000)
@@ -94,6 +106,7 @@ with sync_playwright() as p:
         a.locator('#owner-sync-panel').wait_for(timeout=30000)
         assert a.locator('#doc-title').input_value() == 'オフライン後の追いつき'
         assert b.locator('#editor .block-edit').nth(2).inner_text() == '同期できるか'
+        assert a.locator('#editor .block-edit').nth(1).inner_text() == '再開後もフォーカスを外さない'
         assert a.url==b.url,'private-link fragment remains stable across reload'
         # Regression: high-frequency input generates 120 distinct committed edits
         # without leaving the input or manually refreshing the receiver.
