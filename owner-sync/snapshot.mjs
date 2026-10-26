@@ -58,7 +58,8 @@ export class SnapshotInbox{
     catch{return null;}
     if(bytes.length<1||bytes.length>PART_BYTES)return null;
     let record=this.pending.get(payload.id);
-    if(record&&record.count!==payload.count){this.pending.delete(payload.id);return null;}
+    // A malformed/old count must not poison later valid replay of part 0.
+    if(record&&record.count!==payload.count){this.pending.delete(payload.id);record=null;}
     if(!record){
       // Keep the number of incomplete snapshots bounded; newest arrives last.
       while(this.pending.size>=this.maxPending)this.pending.delete(this.pending.keys().next().value);
