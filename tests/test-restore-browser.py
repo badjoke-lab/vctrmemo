@@ -69,22 +69,24 @@ with sync_playwright() as p:
         assert before
         restore(b,exported)
         restored=json.loads(backup(b))
-        # updatedAt is currently view-only metadata: the v2 causal log
-        # intentionally does not encode it, and the engine projects value 1.
-        # Detect this explicit limitation, but reject ALL actual content loss.
-        def without_view_timestamp(value):
-            if isinstance(value,dict):
-                return {k:without_view_timestamp(v) for k,v in value.items() if k!='updatedAt'}
-            if isinstance(value,list):
-                return [without_view_timestamp(v) for v in value]
-            return value
-        for key in ('schema','pages','tasks','dbColumns','databases'):
-            if restored[key]!=source[key]:
-                if without_view_timestamp(restored[key])!=without_view_timestamp(source[key]):
-                    print('RESTORE MISMATCH',key,'source=',json.dumps(source[key],ensure_ascii=False)[:2500],
-                          'restored=',json.dumps(restored[key],ensure_ascii=False)[:2500],flush=True)
-                    raise AssertionError('UI import/export round-trip lost content: '+key)
-                print('RESTORE LIMIT: updatedAt display metadata differs; user content matches',flush=True)
+        # Exported state may omit default keys on newly inserted blocks
+        # (e.g. deleted:false), and updatedAt is view-only. Both are
+        # normalized when the CRDT history projects the real saved document.
+        # Compare the ACTUAL engine projection before/after import instead of
+        # the incidental form of a live in-memory editor object.
+        expected_project=a.evaluate("""() => {
+          const s=JSON.parse(localStorage.getItem('vctrmemo-v2')).sync;
+          return new VctrSync.Engine(s.ops,s.actor,s.counter).project();
+        }""")
+        actual_project=b.evaluate("""() => {
+          const s=JSON.parse(localStorage.getItem('vctrmemo-v2')).sync;
+          return new VctrSync.Engine(s.ops,s.actor,s.counter).project();
+        }""")
+        assert actual_project==expected_project,'Imported engine did not reconstruct the same saved pages and tasks'
+        assert any(p['title']=='復元検査・日本語のページ'
+                   and p['blocks'][0]['text']=='一行目\n二行目'
+                   for p in actual_project['pages'])
+        print('RESTORE: engine projection of all pages, blocks and tasks matches source',flush=True)
         source_ids={v['id'] for v in source['sync']['ops']}
         restored_ids={v['id'] for v in restored['sync']['ops']}
         assert source_ids<=restored_ids, 'Restore lost saved causal operations'
