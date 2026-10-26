@@ -4,6 +4,7 @@
 import {ownerRelay} from './relay.mjs';
 import {readStorage} from './merge.mjs';
 import {snapshotParts,SnapshotInbox} from './snapshot.mjs';
+import {sealPortableBackup,openPortableBackup,preparePortableRestore,MAX_FILE_BYTES} from './portable-backup.mjs';
 const STORAGE=window.__vctrmemo_owner_storage_key;
 const SECRET=window.__vctrmemo_owner_secret;
 const Sync=window.VctrSync;
@@ -15,6 +16,10 @@ panel.innerHTML=`<details open><summary>本人の端末間同期（ブラウザ�
 <button id="owner-copy-link" type="button">自分専用URLをコピー</button>
 <button id="owner-disconnect" type="button">同期を停止</button>
 <button id="owner-snapshot" type="button">復旧用の暗号化スナップショットを保存</button>
+<div><button id="owner-save-file" type="button">暗号化バックアップをファイル保存</button>
+<button id="owner-load-file" type="button">暗号化バックアップから復元</button>
+<input id="owner-backup-file" type="file" accept=".vctrmemo,.json,application/json" hidden></div>
+<p class="owner-warning">暗号化ファイルはリレー不要で復元できますが、<strong>元の秘密鍵付きURLも必要</strong>です。ファイルとURLは別々の安全な場所に保管してください。</p>
 <p id="owner-sync-state" role="status" aria-live="polite">暗号化同期へ接続しています…</p>
 <p class="owner-warning"><strong>専用URLには復号鍵が含まれます。</strong> URLを知った人は閲覧・変更できます。Vectorの<strong>自分宛てNotesだけ</strong>に貼り、他人へ転送しないでください。この実験版はVector内のMini Appではなく、ブラウザで動作します。外部Nostrリレーへ暗号文を保存します。既存の端末内メモは同期・転送されません。</p>
 </details>`;
@@ -330,6 +335,50 @@ $('owner-copy-link').onclick=async()=>{
   }catch{status('コピーできません。ブラウザのアドレスバーから専用URLをコピーしてください。');}
 };
 $('owner-snapshot').onclick=()=>{void publishSnapshot({manual:true});};
+// Local, offline recovery never calls the relay and never changes the
+// currently opened editor. It needs the exact same private #k= URL on a
+// replacement device, without requiring either original device to be online.
+$('owner-save-file').onclick=async()=>{
+  if(composing){status('日本語変換を確定してからバックアップを保存してください。');return;}
+  const btn=$('owner-save-file');btn.disabled=true;
+  try{
+    const sync=readStorage(localStorage,STORAGE).sync;
+    const data=await sealPortableBackup(sync,SECRET,Sync);
+    const url=URL.createObjectURL(new Blob([data],{type:'application/json'}));
+    const link=document.createElement('a');link.href=url;
+    link.download='vctrmemo-encrypted-'+new Date().toISOString().slice(0,10)+'.vctrmemo';
+    document.body.append(link);link.click();
+    setTimeout(()=>{link.remove();URL.revokeObjectURL(url);},10000);
+    status('暗号化バックアップを保存しました（'+sync.ops.length+'件）。秘密鍵付きURLも必要です。');
+  }catch(err){status('バックアップ失敗: '+String(err.message||err));}
+  finally{btn.disabled=false;}
+};
+$('owner-load-file').onclick=()=>{if(!composing)$('owner-backup-file').click();else status('日本語変換を確定してから復元してください。');};
+$('owner-backup-file').onchange=async()=>{
+  const input=$('owner-backup-file'),file=input.files?.[0],btn=$('owner-load-file');
+  if(!file)return;
+  btn.disabled=true;
+  try{
+    if(composing)throw Error('日本語変換中には復元できません');
+    if(file.size>MAX_FILE_BYTES)throw Error('ファイルが大きすぎます');
+    const backup=await openPortableBackup(await file.text(),SECRET,Sync);
+    const current=readStorage(localStorage,STORAGE).sync;
+    const plan=preparePortableRestore(current,backup.ops,Sync);
+    if(!plan.changes.length){
+      status('復元確認：すべての履歴が既に保存されています（'+plan.count+'件）。');
+      return;
+    }
+    if(!confirm('暗号化ファイルを検証しました（'+plan.count+'件）。既存データを消さず、未登録の履歴'+plan.changes.length+'件を追加しますか？'))return;
+    // This is the ONLY durable writer for both relay sync and local recovery.
+    const detail={ops:plan.changes,applied:false,error:'',missing:0};
+    document.dispatchEvent(new CustomEvent('vctrmemo-owner-apply',{detail}));
+    if(!detail.applied||detail.missing)throw Error(detail.error||'履歴の復元が完了しませんでした');
+    status('暗号化バックアップから復元しました。履歴 '+plan.changes.length+' 件を追加し、元データは保持しました。');
+  }catch(err){
+    status('復元に失敗: '+String(err.message||err)+'（元のメモは維持）');
+    console.warn('Owner portable recovery rejected',err);
+  }finally{btn.disabled=false;input.value='';}
+};
 $('owner-disconnect').onclick=()=>{
   if(stopped){
     status('暗号化同期を再接続しています…');
