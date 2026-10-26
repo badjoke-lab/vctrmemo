@@ -92,9 +92,16 @@ with sync_playwright() as p:
         restore(b,json.dumps(altered,ensure_ascii=False).encode('utf-8'))
         assert b.evaluate("localStorage.getItem('vctrmemo-v2')")==previous
 
-        # Completely empty / new workspaces remain independent: no outgoing
-        # Vector synchronization packets are emitted by restore.
-        assert b.evaluate("document.querySelector('#doc-title')===null || !document.querySelector('#vctrmemo-recovery-stop')")
-        print('RESTORE: real UI export/import; Japanese multiline, all pages and ops; idempotence, atomic conflict rejection, isolated storage PASS',flush=True)
+        # An apparently valid new operation that points to nonexistent
+        # history cannot be accepted as a complete backup.
+        broken=json.loads(exported)
+        missing=dict(broken['sync']['ops'][-1])
+        missing['id']='a_recoverytest_1'
+        missing['pred']=['nonexistent_predecessor']
+        broken['sync']['ops'].append(missing)
+        restore(b,json.dumps(broken,ensure_ascii=False).encode('utf-8'))
+        assert b.evaluate("localStorage.getItem('vctrmemo-v2')")==previous, 'gapped restore must be atomic'
+
+        print('RESTORE: real UI export/import; Japanese multiline, all pages and ops; idempotence, atomic conflict + missing history rejection, isolated storage PASS',flush=True)
     finally:
         browser.close()
