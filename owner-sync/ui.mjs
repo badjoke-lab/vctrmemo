@@ -28,13 +28,13 @@ panel.innerHTML=`<details open><summary>本人の端末間同期（ブラウザ�
 // the editable blocks or the Android on-screen keyboard.
 panel.querySelector('details').open=!matchMedia('(max-width:800px)').matches;
 const style=document.createElement('style');
-style.textContent=`#owner-sync-panel{position:fixed;right:12px;bottom:12px;z-index:9000;max-width:min(380px,calc(100vw - 24px));background:#15241f;color:#f2f6f2;border:1px solid #5c8274;padding:12px;border-radius:12px;font:13px system-ui;box-shadow:0 8px 22px #0007}
+style.textContent=`#owner-sync-panel{position:fixed;right:12px;bottom:12px;z-index:9000;max-width:min(380px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow-y:auto;box-sizing:border-box;background:#15241f;color:#f2f6f2;border:1px solid #5c8274;padding:12px;border-radius:12px;font:13px system-ui;box-shadow:0 8px 22px #0007}
 #owner-sync-panel summary{cursor:pointer;font-weight:600}
 #owner-sync-panel p{line-height:1.45;margin:10px 0}
 #owner-sync-panel button{font:inherit;padding:7px;margin:4px 5px 4px 0;background:#244339;border:1px solid #60806e;color:white;border-radius:5px;cursor:pointer}
 #owner-sync-panel .owner-warning{font-size:11px;color:#cabb9d}
 @media(max-width:800px){
-  #owner-sync-panel{position:static;max-width:none;width:auto;z-index:auto;margin:10px 16px 0;padding:10px 12px;box-shadow:none}
+  #owner-sync-panel{position:static;max-width:none;max-height:none;overflow:visible;width:auto;z-index:auto;margin:10px 16px 0;padding:10px 12px;box-shadow:none}
   #owner-sync-panel summary{min-height:28px;display:list-item;line-height:28px}
   #owner-sync-panel button{max-width:100%;white-space:normal}
 }`;
