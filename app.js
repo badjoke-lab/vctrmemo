@@ -750,7 +750,17 @@
         const trial=new VctrSync.Engine(engine.export().ops,engine.actor,engine.counter);
         const existing=new Map(trial.export().ops.map(op=>[op.id,JSON.stringify(op)]));
         for(const op of imported)if(existing.has(op.id)&&existing.get(op.id)!==JSON.stringify(op))throw new Error('既存履歴とIDが衝突しています');
+        // The engine has a hard MAX_OPS capacity. Merging past that limit
+        // silently truncated history previously, then reported "restored".
+        // Reject the entire import BEFORE touching live state or storage.
+        const expected=new Set([...existing.keys(),...imported.map(op=>op.id)]);
+        if(expected.size>12000)throw new Error('履歴の上限を超えるため、取込を中止しました');
         trial.merge(imported);
+        const actuallyRestored=new Set(trial.export().ops.map(op=>op.id));
+        if(actuallyRestored.size!==expected.size || [...expected].some(id=>!actuallyRestored.has(id)))
+          throw new Error('履歴をすべて復元できません。元データを保持します');
+        if(trial.missingPredecessors().length)
+          throw new Error('先行する編集履歴が不足しています。元データを保持します');
         engine=trial;state=engine.project();baseline=structuredClone(state);persist(true);render();
       }else mergeState(parsed);
       toast('バックアップを取り込みました。');
