@@ -85,6 +85,35 @@ with sync_playwright() as p:
         load(second,saved)
         assert '個人データは送信しない' in second.locator('#pages-list').inner_text()
         assert second.evaluate("window.__out.length")==0
+        # A corrupt previous save MUST NEVER be overwritten by fresh defaults.
+        # This is a data-loss regression, not a general UI fallback test.
+        corrupt_cases=[
+            '{"sync":',
+            '{"sync":{"version":2,"actor":"tester","counter":0,"ops":[{"id":"x","key":"invalid","pred":[],"value":"hi"}]}}'
+        ]
+        for raw in corrupt_cases:
+            broken=ctx.new_page()
+            broken.set_content((ROOT/'index.html').read_text())
+            broken.evaluate("""raw => {
+              const data=new Map([['vctrmemo-v2',raw]]);
+              Object.defineProperty(window,'localStorage',{configurable:true,value:{
+                getItem:key=>data.has(key)?data.get(key):null,
+                setItem:(key,value)=>data.set(key,String(value)),
+                removeItem:key=>data.delete(key)
+              }});
+            }""",raw)
+            broken.add_style_tag(content=(ROOT/'styles.css').read_text())
+            for name in ('sync-core.js','transfer.js','app.js'):
+                broken.add_script_tag(content=(ROOT/name).read_text())
+            assert broken.locator('#vctrmemo-recovery-stop').is_visible()
+            assert broken.evaluate("localStorage.getItem('vctrmemo-v2')")==raw, 'saved bytes overwritten after corrupted load'
+            async_button=broken.locator('#vctrmemo-recovery-stop button')
+            with broken.expect_download() as download_info:
+                async_button.click()
+            assert download_info.value.suggested_filename.startswith('vctrmemo-raw-recovery-')
+            broken.reload(wait_until='domcontentloaded')
+            broken.close()
+        print('STORAGE SAFETY: invalid JSON and invalid operation history preserved; raw recovery export available PASS')
         print('vctrmemo v0.12: solo storage intact, hostile legacy chat replay rejected, no unauthorized outbound, reload PASS')
         ctx.close()
     finally:
