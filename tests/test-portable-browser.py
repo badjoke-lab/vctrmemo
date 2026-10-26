@@ -66,7 +66,7 @@ with sync_playwright() as p:
             a.locator('#owner-save-file').click()
         encrypted=download.value.path().read_bytes()
         assert download.value.suggested_filename.endswith('.vctrmemo')
-        assert b'オフラインから復元するページ' not in encrypted
+        assert 'オフラインから復元するページ'.encode('utf-8') not in encrypted
         assert b'Mac' not in encrypted
         assert SECRET.encode() not in encrypted
         assert json.loads(encrypted)['operations']==len(source['ids'])
