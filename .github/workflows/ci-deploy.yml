@@ -67,7 +67,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
         with:
-          ref: 4cef5f9a0349ebd167578e06bdff47aca621a192
+          ref: 5a434d9f2f8e9248b2312791c071cca47f7830b2
           path: owner-candidate
           persist-credentials: false
       - name: Build isolated owner-sync release candidate
@@ -79,7 +79,7 @@ jobs:
           node --test owner-candidate/owner-sync/tests/snapshot.test.mjs
           python owner-candidate/scripts/build.py
           ./node_modules/.bin/esbuild owner-candidate/owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=owner-candidate/dist/site/owner-sync.js
-          python owner-candidate/tests/test-portable-browser.py
+          timeout 150s python -u owner-candidate/tests/test-portable-browser.py
           mkdir -p dist/site/rc
           rsync -a --exclude='*.xdc' owner-candidate/dist/site/ dist/site/rc/
           python - <<'PY'
