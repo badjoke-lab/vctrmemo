@@ -26,10 +26,20 @@ SECRET='57'*32
 URL=BASE+'#k='+SECRET
 
 def enter(page, private_url=URL):
+    page.on('pageerror',lambda e:print('OFFLINE JS ERROR:',str(e)[:300],flush=True))
+    page.on('console',lambda m:print('OFFLINE JS CONSOLE:',m.text[:300],flush=True) if m.type=='error' else None)
     print('OFFLINE ENTER: navigate',flush=True)
     page.goto(private_url,wait_until='domcontentloaded',timeout=15000)
     print('OFFLINE ENTER: page loaded',flush=True)
-    page.locator('#owner-save-file').wait_for(timeout=15000)
+    page.wait_for_timeout(1000)
+    print('OFFLINE BOOT:',page.evaluate("""() => ({
+      secure:isSecureContext,
+      storageReady:!!window.__vctrmemo_owner_storage_key,
+      storageData:!!localStorage.getItem(window.__vctrmemo_owner_storage_key||'_missing'),
+      bootstrap:document.querySelector('#owner-link-bootstrap')?.textContent?.slice(0,180),
+      panel:!!document.querySelector('#owner-save-file')
+    })"""),flush=True)
+    page.locator('#owner-save-file').wait_for(timeout=4000)
     print('OFFLINE ENTER: sync controls loaded',flush=True)
     # The point of this test is recovery WITHOUT any relay. Never gate file
     # recovery on the network reporting a successful connection.
