@@ -67,6 +67,7 @@
     // Do not let a damaged, oversized or unavailable local history silently
     // become a fresh workspace. A later persist() would destroy the evidence.
     console.error('vctrmemo safe-stop: original saved data left untouched',err);
+    window.__vctrmemo_safe_stopped=true;
     const warning=document.createElement('section');
     warning.id='vctrmemo-recovery-stop';
     warning.setAttribute('role','alert');
