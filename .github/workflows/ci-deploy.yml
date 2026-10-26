@@ -67,7 +67,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
         with:
-          ref: 75ee363faa4afde95c3e49f039bd6b67b5dd5f04
+          ref: 4cef5f9a0349ebd167578e06bdff47aca621a192
           path: owner-candidate
           persist-credentials: false
       - name: Build isolated owner-sync release candidate
