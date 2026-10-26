@@ -45,6 +45,21 @@ jobs:
         run: |
           python -m pip install playwright
           python -m playwright install chromium
+      - name: Check out tested sync candidate for isolated preview
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@v4
+        with:
+          ref: 551544391d12c8c4ef67541c710d72021526d3c3
+          path: owner-candidate
+          persist-credentials: false
+      - name: Check encrypted offline recovery candidate before release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          node --test owner-candidate/owner-sync/tests/portable-backup.test.mjs
+          node --test owner-candidate/owner-sync/tests/snapshot.test.mjs
+          python owner-candidate/scripts/build.py
+          ./node_modules/.bin/esbuild owner-candidate/owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=owner-candidate/dist/site/owner-sync.js
+          timeout 90s python -u owner-candidate/tests/test-portable-browser.py
       - name: Browser integration test
         run: |
           python tests/test-browser.py
@@ -63,23 +78,9 @@ jobs:
         run: ./node_modules/.bin/esbuild owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=dist/site/owner-sync.js
       # Main remains the stable site. The experimental browser candidate gets
       # an independent URL, relay identity and localStorage namespace.
-      - name: Check out tested sync candidate for isolated preview
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/checkout@v4
-        with:
-          ref: 5a434d9f2f8e9248b2312791c071cca47f7830b2
-          path: owner-candidate
-          persist-credentials: false
       - name: Build isolated owner-sync release candidate
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
-          # Abort deployment if the proposed candidate cannot safely restore an
-          # encrypted file or if an isolated browser profile loses its notes.
-          node --test owner-candidate/owner-sync/tests/portable-backup.test.mjs
-          node --test owner-candidate/owner-sync/tests/snapshot.test.mjs
-          python owner-candidate/scripts/build.py
-          ./node_modules/.bin/esbuild owner-candidate/owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=owner-candidate/dist/site/owner-sync.js
-          timeout 150s python -u owner-candidate/tests/test-portable-browser.py
           mkdir -p dist/site/rc
           rsync -a --exclude='*.xdc' owner-candidate/dist/site/ dist/site/rc/
           python - <<'PY'
