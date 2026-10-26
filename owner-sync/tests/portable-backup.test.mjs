@@ -71,6 +71,7 @@ test('malformed history, partial causal chain, cross-record ID collision and lim
  const one=original.ops.at(-1);
  assert.throws(()=>validateCompleteHistory(Array.from({length:12001},(_,i)=>({...one,id:'a_overflow_'+i,pred:[]})),Sync),/length/);
  const incomplete=structuredClone(current);
- incomplete.ops=incomplete.ops.filter(op=>op.id!==target.pred[0]);
+ const missingCurrentId=incomplete.ops.find(op=>op.pred.length).pred[0];
+ incomplete.ops=incomplete.ops.filter(op=>op.id!==missingCurrentId);
  assert.throws(()=>preparePortableRestore(incomplete,original.ops.slice(0,1),Sync),/Unresolved local predecessor|missing predecessor/);
 });
