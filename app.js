@@ -41,18 +41,55 @@
   });
   const validate = (value) => value && value.schema === 1 && Array.isArray(value.pages) && Array.isArray(value.tasks) && value.pages.every(p=>p&&typeof p.id==='string'&&Array.isArray(p.blocks)) && value.tasks.every(t=>t&&typeof t.id==='string');
   let state, engine;
+  let storedRaw=null;
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if(stored?.sync?.version===2 && Array.isArray(stored.sync.ops)) {
-      engine = new VctrSync.Engine(stored.sync.ops, stored.sync.actor, stored.sync.counter);
-      state = engine.project();
-    } else {
-      let older = null;
-      try { older = JSON.parse(localStorage.getItem(V1_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)); }catch{}
-      state = validate(older) ? older : defaults();
-      engine = VctrSync.Engine.fromState(state);
+    storedRaw=localStorage.getItem(STORAGE_KEY);
+    const stored=storedRaw===null?null:JSON.parse(storedRaw);
+    if(storedRaw!==null){
+      if(!stored||stored.sync?.version!==2||!Array.isArray(stored.sync.ops))throw Error('同期履歴の構造が不正です');
+      if(stored.sync.ops.length>12000||!stored.sync.ops.every(VctrSync.isValidOp))throw Error('同期履歴に不正な変更があります');
+      const seenIds=new Map();
+      for(const op of stored.sync.ops){
+        const previous=seenIds.get(op.id);
+        if(previous!==undefined)throw Error(previous===JSON.stringify(op)?'同期履歴に重複があります':'同じIDの変更が衝突しています');
+        seenIds.set(op.id,JSON.stringify(op));
+      }
+      engine=new VctrSync.Engine(stored.sync.ops,stored.sync.actor,stored.sync.counter);
+      if(engine.ops.size!==stored.sync.ops.length)throw Error('同期履歴を完全に読み込めません');
+      state=engine.project();
+    }else{
+      let older=null;
+      try{older=JSON.parse(localStorage.getItem(V1_STORAGE_KEY)??localStorage.getItem(LEGACY_STORAGE_KEY));}catch{}
+      state=validate(older)?older:defaults();
+      engine=VctrSync.Engine.fromState(state);
     }
-  }catch(err){console.error('vctrmemo storage issue',err);state=defaults();engine=VctrSync.Engine.fromState(state);}
+  }catch(err){
+    // Do not let a damaged, oversized or unavailable local history silently
+    // become a fresh workspace. A later persist() would destroy the evidence.
+    console.error('vctrmemo safe-stop: original saved data left untouched',err);
+    window.__vctrmemo_safe_stopped=true;
+    const warning=document.createElement('section');
+    warning.id='vctrmemo-recovery-stop';
+    warning.setAttribute('role','alert');
+    warning.style.cssText='margin:24px;padding:20px;max-width:780px;border:2px solid #ba8a57;border-radius:10px;background:#2b211b;color:#fff;font:14px/1.7 system-ui';
+    const heading=document.createElement('h2');heading.textContent='保存データを読み込めません。安全のため編集を停止しました。';
+    const desc=document.createElement('p');desc.textContent='この端末の既存データは上書きしていません。再読み込みやデータ消去を繰り返さず、元データを保存してから復旧してください。詳細: '+String(err.message||err);
+    warning.append(heading,desc);
+    if(storedRaw!==null){
+      const save=document.createElement('button');save.type='button';save.textContent='元の保存データをJSONで書き出す';
+      save.onclick=()=>{
+        const link=document.createElement('a');
+        link.href=URL.createObjectURL(new Blob([storedRaw],{type:'application/json'}));
+        link.download='vctrmemo-raw-recovery-'+new Date().toISOString().slice(0,10)+'.json';
+        document.body.append(link);link.click();
+        setTimeout(()=>{URL.revokeObjectURL(link.href);link.remove();},2000);
+      };
+      warning.append(save);
+    }
+    const app=document.getElementById('app');
+    if(app)app.replaceChildren(warning);else document.body.append(warning);
+    return;
+  }
   let baseline = structuredClone(state);
   let incomingQueue = [];
   // Personal/local is the default. Incoming chat ops are quarantined until opt-in.
@@ -276,7 +313,7 @@
     actions.append(button('削除' ,'subtle-button danger',()=>{if(!confirm('このページを削除しますか？ JSONバックアップがない場合、復元できません。'))return;page.deleted=true;touchPage(page);setView('home');}));top.append(title,actions);root.append(top);
     const backlinks=livePages().filter(p=>p.id!==page.id && p.blocks.some(b=>b.type==='link'&&b.targetId===page.id));
     if(backlinks.length){const related=document.createElement('div');related.className='backlinks';related.append(document.createTextNode('このページへのリンク: '));for(const p of backlinks)related.append(button(p.title||'無題','subtle-button',()=>setView(p.id)));root.append(related);}
-    const hint=document.createElement('p');hint.className='doc-hint';hint.textContent='入力は自動保存されます。Enterで新しいブロック、Shift+Enterで改行。';root.append(hint);
+    const hint=document.createElement('p');hint.className='doc-hint';hint.textContent='自動保存。Enterで改行、Ctrl＋Enter（Macは⌘＋Enter）で新しいブロック。';root.append(hint);
     const editor=document.createElement('div');editor.className='editor';editor.id='editor';root.append(editor);
     renderBlocks(editor,page);
   }
@@ -342,10 +379,33 @@
       }
       const edit=document.createElement('div');edit.className='block-edit '+(block.type==='text'?'':block.type);edit.contentEditable='true';edit.textContent=block.text;edit.setAttribute('role','textbox');edit.setAttribute('aria-multiline','true');edit.dataset.placeholder=block.type==='text'?'入力を開始…':'内容を入力…';
       if(block.checked){edit.style.textDecoration='line-through';edit.style.color='#687d71';}
-      edit.addEventListener('input',()=>{block.text=edit.innerText.replace(/\r/g,'').slice(0,30000);touchPage(page);});
+      let composing=false;
+      const saveEditorText=()=>{
+        block.text=edit.innerText.replace(/\r/g,'').slice(0,30000);
+        touchPage(page);
+      };
+      // IME conversion is not a paragraph boundary. Some browsers report an
+      // Enter keydown with keyCode 229 while composing Japanese candidates.
+      // Do not persist unfinished conversion candidates as separate versions.
+      edit.addEventListener('compositionstart',()=>{composing=true;});
+      edit.addEventListener('compositionend',()=>{composing=false;saveEditorText();});
+      edit.addEventListener('input',()=>{if(!composing)saveEditorText();});
       edit.addEventListener('keydown',e=>{
-        if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const next=makeBlock();page.blocks.splice(page.blocks.findIndex(b=>b.id===block.id)+1,0,next);touchPage(page);renderBlocks(editor,page);focusBlock(next.id);}
-        if(e.key==='Backspace' && !edit.innerText && page.blocks.length>1){e.preventDefault();const idx=page.blocks.findIndex(b=>b.id===block.id);page.blocks.splice(idx,1);touchPage(page);renderBlocks(editor,page);focusBlock(page.blocks[Math.max(0,idx-1)].id);}
+        if(e.isComposing||composing||e.keyCode===229||e.which===229)return;
+        // Default Enter/Shift+Enter creates an ordinary newline IN this block.
+        // Explicit Ctrl/Cmd+Enter or the existing ＋ button creates a block.
+        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)&&!e.shiftKey){
+          e.preventDefault();
+          const next=makeBlock();
+          page.blocks.splice(page.blocks.findIndex(b=>b.id===block.id)+1,0,next);
+          touchPage(page);renderBlocks(editor,page);focusBlock(next.id);
+          return;
+        }
+        if(e.key==='Backspace' && !edit.innerText && page.blocks.length>1){
+          e.preventDefault();const idx=page.blocks.findIndex(b=>b.id===block.id);
+          page.blocks.splice(idx,1);touchPage(page);renderBlocks(editor,page);
+          focusBlock(page.blocks[Math.max(0,idx-1)].id);
+        }
       });
       row.append(edit);editor.append(row);
       if(pickerFor===block.id)editor.append(blockPicker(editor,page,i+1));
@@ -690,7 +750,17 @@
         const trial=new VctrSync.Engine(engine.export().ops,engine.actor,engine.counter);
         const existing=new Map(trial.export().ops.map(op=>[op.id,JSON.stringify(op)]));
         for(const op of imported)if(existing.has(op.id)&&existing.get(op.id)!==JSON.stringify(op))throw new Error('既存履歴とIDが衝突しています');
+        // The engine has a hard MAX_OPS capacity. Merging past that limit
+        // silently truncated history previously, then reported "restored".
+        // Reject the entire import BEFORE touching live state or storage.
+        const expected=new Set([...existing.keys(),...imported.map(op=>op.id)]);
+        if(expected.size>12000)throw new Error('履歴の上限を超えるため、取込を中止しました');
         trial.merge(imported);
+        const actuallyRestored=new Set(trial.export().ops.map(op=>op.id));
+        if(actuallyRestored.size!==expected.size || [...expected].some(id=>!actuallyRestored.has(id)))
+          throw new Error('履歴をすべて復元できません。元データを保持します');
+        if(trial.missingPredecessors().length)
+          throw new Error('先行する編集履歴が不足しています。元データを保持します');
         engine=trial;state=engine.project();baseline=structuredClone(state);persist(true);render();
       }else mergeState(parsed);
       toast('バックアップを取り込みました。');
@@ -764,6 +834,105 @@
   }
   $('sync-now').addEventListener('click',()=>{
     toast('チャット共有は安全な権限・保存領域の分離が完成するまで利用できません。');
+  });
+  // Remote changes can update a focused editor without waiting for blur.
+  // Capture and restore its logical position; do not steal focus or viewport.
+  function ownerActiveCaret(){
+    const active=document.activeElement;
+    if(!active)return null;
+    if(active.id==='doc-title'){
+      return {kind:'title',start:active.selectionStart||0,end:active.selectionEnd||0,direction:active.selectionDirection||'none'};
+    }
+    if(active.classList?.contains('block-edit')){
+      const row=active.closest('.block-row'),index=[...document.querySelectorAll('#editor .block-row')].indexOf(row);
+      if(index<0)return null;
+      const range=window.getSelection();
+      let start=0,end=0;
+      if(range&&range.rangeCount){
+        const r=range.getRangeAt(0);
+        if(active.contains(r.startContainer)){
+          const before=document.createRange();before.selectNodeContents(active);before.setEnd(r.startContainer,r.startOffset);
+          start=before.toString().length;
+        }
+        if(active.contains(r.endContainer)){
+          const before=document.createRange();before.selectNodeContents(active);before.setEnd(r.endContainer,r.endOffset);
+          end=before.toString().length;
+        }else end=start;
+      }
+      return {kind:'block',index,start,end};
+    }
+    return null;
+  }
+  function ownerRestoreCaret(caret){
+    if(!caret)return;
+    const active=caret.kind==='title'?$('doc-title'):document.querySelectorAll('#editor .block-edit')[caret.index];
+    if(!active)return;
+    active.focus({preventScroll:true});
+    if(caret.kind==='title'){
+      active.setSelectionRange(Math.min(caret.start,active.value.length),Math.min(caret.end,active.value.length),caret.direction);
+      return;
+    }
+    const selection=window.getSelection();
+    if(!selection)return;
+    const walker=document.createTreeWalker(active,NodeFilter.SHOW_TEXT);
+    const locate=n=>{
+      let text,total=0,last=null;
+      while(text=walker.nextNode()){
+        last=text;
+        if(total+text.length>=n)return {node:text,offset:n-total};
+        total+=text.length;
+      }
+      return last?{node:last,offset:last.length}:{node:active,offset:0};
+    };
+    const a=locate(caret.start);
+    walker.currentNode=active;
+    const b=locate(caret.end);
+    const range=document.createRange();
+    range.setStart(a.node,a.offset);
+    range.setEnd(b.node,b.offset);
+    selection.removeAllRanges();selection.addRange(range);
+  }
+  // The browser-only owner sync must not write localStorage behind this editor.
+  // Apply remote operations through the SAME engine that captures keystrokes.
+  // A synchronous CustomEvent acts as the application/transport commit boundary.
+  document.addEventListener('vctrmemo-owner-apply', event => {
+    if(!window.__vctrmemo_owner_storage_key || STORAGE_KEY!==window.__vctrmemo_owner_storage_key)return;
+    const detail=event.detail;
+    if(!detail||!Array.isArray(detail.ops)||detail.ops.length<1||detail.ops.length>12000)return;
+    try {
+      const known=new Map(engine.export().ops.map(op=>[op.id,JSON.stringify(op)]));
+      const fresh=[],staged=new Map();
+      for(const op of detail.ops){
+        if(!VctrSync.isValidOp(op))throw Error('Invalid remote operation');
+        const serialized=JSON.stringify(op);
+        if(known.has(op.id)){if(known.get(op.id)!==serialized)throw Error('Conflicting operation ID');continue;}
+        if(staged.has(op.id)){if(staged.get(op.id)!==serialized)throw Error('Conflicting operation ID');continue;}
+        staged.set(op.id,serialized);fresh.push(op);
+      }
+      if(fresh.length){
+        const trial=new VctrSync.Engine(engine.export().ops,engine.actor,engine.counter);
+        // Commit any locally edited field BEFORE incorporating remote operations.
+        // Otherwise stale app state could silently replace already received data.
+        trial.capture(state,baseline);
+        if(trial.merge(fresh)!==fresh.length)throw Error('History capacity exceeded');
+        const projected=trial.project();
+        // Durable local commit must succeed BEFORE notifying the transport.
+        localStorage.setItem(STORAGE_KEY,JSON.stringify({sync:trial.export()}));
+        engine=trial;state=projected;baseline=structuredClone(state);
+        $('save-state').textContent='● 端末保存済み';
+        updateConflictButton();updateSyncState();
+        // Render live even while a regular input remains focused.
+        // The transport defers only an active IME composition, so Android's
+        // Japanese text conversion is never interrupted mid-composition.
+        const caret=ownerActiveCaret();
+        const scrollX=window.scrollX,scrollY=window.scrollY;
+        render();
+        ownerRestoreCaret(caret);
+        if(caret)window.scrollTo(scrollX,scrollY);
+      }
+      detail.applied=true;
+      detail.missing=engine.missingPredecessors().length;
+    }catch(err){detail.error=String(err.message||err);console.error('Owner-sync merge rejected',err);}
   });
   persist(true);render();updateSyncState();
 })();
