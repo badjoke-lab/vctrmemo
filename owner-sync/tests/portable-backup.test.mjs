@@ -32,8 +32,9 @@ test('private key-bound file: entire history decrypts offline and preserves conf
  assert.deepEqual(fresh.missingPredecessors(),[]);
  assert.equal(preparePortableRestore(fresh.export(),imported.ops,Sync).changes.length,0);
  // Concurrent writes from two offline devices survive as separate versions.
+ original.change(JSON.stringify(['P','page','title']),'PCの別編集');
  const alternate=fixture();
- alternate.change(JSON.stringify(['P','page','title']),'同時編集候補');
+ alternate.change(JSON.stringify(['P','page','title']),'スマホの別編集');
  const conflict=Sync.Engine.fromState({schema:1,pages:[],tasks:[],databases:[],dbColumns:[]});
  conflict.merge([...original.export().ops,...alternate.export().ops.filter(o=>!o.id.startsWith('i_'))]);
  assert.ok(conflict.conflicts.length>0);
