@@ -25,7 +25,9 @@ try{
   window.__vctrmemo_owner_secret=secret; // In-memory only; never saved to localStorage.
   // Explicitly isolate this opt-in synced workspace from existing vctrmemo-v2 notes.
   await import('./app.js');
-  await import('../owner-sync.js');
+  // A corrupt local history must not start network synchronization at all.
+  // Keep its raw-data recovery screen visible and leave all local bytes intact.
+  if(!window.__vctrmemo_safe_stopped)await import('../owner-sync.js');
   root.remove();
 }catch(error){
   root.textContent='開始できません: '+String(error.message||error);
