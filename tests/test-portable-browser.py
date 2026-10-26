@@ -28,6 +28,7 @@ URL=BASE+'#k='+SECRET
 def enter(page, private_url=URL):
     page.goto(private_url,wait_until='domcontentloaded',timeout=30000)
     page.locator('#owner-save-file').wait_for(timeout=30000)
+    page.wait_for_function("""() => document.querySelector('#owner-sync-state')?.textContent.includes('接続しました')""",timeout=20000)
     page.locator('#owner-disconnect').click()
     assert page.locator('#owner-disconnect').inner_text()=='同期を再開', 'relay should be paused'
     return page.evaluate("window.__vctrmemo_owner_storage_key")
