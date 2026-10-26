@@ -26,8 +26,11 @@ SECRET='57'*32
 URL=BASE+'#k='+SECRET
 
 def enter(page, private_url=URL):
-    page.goto(private_url,wait_until='domcontentloaded',timeout=30000)
-    page.locator('#owner-save-file').wait_for(timeout=30000)
+    print('OFFLINE ENTER: navigate',flush=True)
+    page.goto(private_url,wait_until='domcontentloaded',timeout=15000)
+    print('OFFLINE ENTER: page loaded',flush=True)
+    page.locator('#owner-save-file').wait_for(timeout=15000)
+    print('OFFLINE ENTER: sync controls loaded',flush=True)
     # The point of this test is recovery WITHOUT any relay. Never gate file
     # recovery on the network reporting a successful connection.
     page.wait_for_function("""() => {
@@ -35,7 +38,9 @@ def enter(page, private_url=URL):
       return key&&localStorage.getItem(key)!=null;
     }""",timeout=20000)
     page.wait_for_timeout(250)
-    page.locator('#owner-disconnect').click()
+    print('OFFLINE ENTER: pausing relay',flush=True)
+    page.locator('#owner-disconnect').click(timeout=6000)
+    print('OFFLINE ENTER: paused',flush=True)
     assert page.locator('#owner-disconnect').inner_text()=='同期を再開', 'relay should be paused'
     return page.evaluate("window.__vctrmemo_owner_storage_key")
 
@@ -54,7 +59,9 @@ with sync_playwright() as p:
             # Offline recovery MUST NOT depend on open network connections.
             context.route_web_socket('**/*',lambda ws:ws.close())
         a,b,c=[context.new_page() for context in contexts]
+        print('OFFLINE TEST: create source browser',flush=True)
         storage_a=enter(a)
+        print('OFFLINE TEST: source ready',flush=True)
         a.locator('#new-page').click()
         a.locator('#doc-title').fill('オフラインから復元するページ')
         edit=a.locator('#editor .block-edit').first
@@ -68,9 +75,11 @@ with sync_playwright() as p:
           const s=JSON.parse(localStorage.getItem(window.__vctrmemo_owner_storage_key)).sync;
           return {actor:s.actor,ids:s.ops.map(op=>op.id),doc:new VctrSync.Engine(s.ops,s.actor,s.counter).project()}
         }""")
-        with a.expect_download() as download:
+        print('OFFLINE TEST: begin encrypted download',flush=True)
+        with a.expect_download(timeout=12000) as download:
             a.locator('#owner-save-file').click()
         encrypted=download.value.path().read_bytes()
+        print('OFFLINE TEST: downloaded file, bytes=',len(encrypted),flush=True)
         assert download.value.suggested_filename.endswith('.vctrmemo')
         assert 'オフラインから復元するページ'.encode('utf-8') not in encrypted
         assert b'Mac' not in encrypted
@@ -78,6 +87,7 @@ with sync_playwright() as p:
         assert json.loads(encrypted)['operations']==len(source['ids'])
         print('PORTABLE BACKUP: encrypted local download without relay PASS',flush=True)
 
+        print('OFFLINE TEST: create isolated receiver',flush=True)
         storage_b=enter(b)
         assert storage_a==storage_b
         assert b.locator('#pages-list').get_by_text('オフラインから復元するページ').count()==0
@@ -100,6 +110,7 @@ with sync_playwright() as p:
         print('PORTABLE RESTORE: isolated browser keeps actor; full history, multiline text, idempotence PASS',flush=True)
 
         # Even a file from a different valid URL must NOT enter this workspace.
+        print('OFFLINE TEST: wrong-key browser',flush=True)
         enter(c,BASE+'#k='+'9c'*32)
         before_wrong=c.evaluate("localStorage.getItem(window.__vctrmemo_owner_storage_key)")
         upload(c,encrypted)
