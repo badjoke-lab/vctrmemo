@@ -3,6 +3,7 @@
 // the URL fragment. The secret never reaches the HTTP server or Nostr relay.
 import {ownerRelay} from './relay.mjs';
 import {readStorage} from './merge.mjs';
+import {snapshotParts,SnapshotInbox} from './snapshot.mjs';
 const STORAGE=window.__vctrmemo_owner_storage_key;
 const SECRET=window.__vctrmemo_owner_secret;
 const Sync=window.VctrSync;
@@ -13,6 +14,7 @@ panel.innerHTML=`<details open><summary>本人の端末間同期（ブラウザ�
 <p>この端末とスマホで<strong>同じ専用URL</strong>を開くと自動同期します。別アカウントや手動の鍵入力は不要です。</p>
 <button id="owner-copy-link" type="button">自分専用URLをコピー</button>
 <button id="owner-disconnect" type="button">同期を停止</button>
+<button id="owner-snapshot" type="button">復旧用の暗号化スナップショットを保存</button>
 <p id="owner-sync-state" role="status" aria-live="polite">暗号化同期へ接続しています…</p>
 <p class="owner-warning"><strong>専用URLには復号鍵が含まれます。</strong> URLを知った人は閲覧・変更できます。Vectorの<strong>自分宛てNotesだけ</strong>に貼り、他人へ転送しないでください。この実験版はVector内のMini Appではなく、ブラウザで動作します。外部Nostrリレーへ暗号文を保存します。既存の端末内メモは同期・転送されません。</p>
 </details>`;
@@ -40,7 +42,56 @@ let client=null,period=null,flushing=false,publishing=false,pending=[],published
 let deviceId='',receiptsQueued=new Set(),receiptsSent=new Set(),receiptsByPeer=new Map(),receipting=false;
 let resendCursor=0,lastResendAt=0,lastNeedAt=0,repairing=false,asking=false;
 let composing=false,replayReplying=false;
+let snapshotPublishing=false,connectedAt=0;
+const snapshotInbox=new SnapshotInbox(Sync),snapshotRequests=new Map();
 const replayRequests=new Map();
+const snapshotKey=()=> 'vctrmemo-owner-snapshot-'+room;
+function lastSnapshot(){
+  try{return JSON.parse(localStorage.getItem(snapshotKey())||'null');}catch{return null;}
+}
+// Does not overwrite local data. Uses the exact same AES-GCM signed event
+// transport as ordinary operations, after complete SHA-256 verification.
+async function publishSnapshot({manual=false,requested=false}={}){
+  if(!client||stopped||snapshotPublishing){
+    if(manual)status('現在同期できません。再開後にスナップショットを保存してください。');
+    return;
+  }
+  snapshotPublishing=true;
+  const button=$('owner-snapshot');button.disabled=true;
+  try{
+    const sync=readStorage(localStorage,STORAGE).sync;
+    const plan=await snapshotParts(sync,Sync);
+    const previous=lastSnapshot();
+    if(!manual&&!requested&&previous?.id===plan.id)return;
+    if(requested&&previous?.id===plan.id&&Date.now()-previous.at<60000)return;
+    if(manual)status('復旧用の暗号化履歴を '+plan.count+' 分割で保存しています…');
+    for(const part of plan.parts){
+      if(stopped||!client)throw Error('同期を停止したため中断しました');
+      await client.publish(part);
+    }
+    localStorage.setItem(snapshotKey(),JSON.stringify({id:plan.id,at:Date.now(),opCount:sync.ops.length}));
+    if(manual)status('暗号化スナップショット '+plan.count+' 分割をリレーが受理しました（永続保管の保証はありません）');
+  }catch(err){
+    if(manual)status('スナップショット保存失敗: '+err.message);
+    console.warn('Owner-sync snapshot publish failed',err);
+  }finally{snapshotPublishing=false;button.disabled=false;}
+}
+function autoSnapshot(){
+  if(!client||stopped||snapshotPublishing||Date.now()-connectedAt<90000)return;
+  try{
+    const sync=readStorage(localStorage,STORAGE).sync;
+    const latest=lastSnapshot();
+    if(!sync.ops.some(op=>op.id.startsWith('a_')))return;
+    if(latest && (sync.ops.length-latest.opCount<50||Date.now()-latest.at<30*60*1000))return;
+    void publishSnapshot();
+  }catch(err){console.warn('Owner-sync automatic snapshot deferred',err);}
+}
+function respondSnapshotRequest(device){
+  if(!client||stopped||device===deviceId)return;
+  if(Date.now()-(snapshotRequests.get(device)||0)<120000)return;
+  snapshotRequests.set(device,Date.now());
+  void publishSnapshot({requested:true});
+}
 const lastReceiptAt=new Map();
 const peerConfirmed=id=>[...receiptsByPeer.values()].some(ids=>ids.has(id));
 const receiptKey=()=> 'vctrmemo-owner-receipts-'+room;
@@ -168,8 +219,22 @@ async function flushRemote(){
   }finally{flushing=false;}
 }
 function inbound(payload){
+  if(payload?.type==='snapshot-part-v1'){
+    void snapshotInbox.accept(payload).then(result=>{
+      if(!result||stopped)return;
+      // Reuse the editor's single writer. A snapshot never replaces the
+      // workspace or its local actor; it merges the complete operation log.
+      pending.push(...result.ops);
+      status('復旧用履歴 '+result.ops.length+'件の整合性を検証しました。画面へ統合しています…');
+      void flushRemote();
+    }).catch(err=>console.warn('Invalid encrypted snapshot ignored',err));
+    return;
+  }
   if(payload?.type==='rejoin-v1'){
-    if(typeof payload.device==='string'&&/^[a-f0-9-]{36}$/.test(payload.device))void replayRecentTo(payload.device);
+    if(typeof payload.device==='string'&&/^[a-f0-9-]{36}$/.test(payload.device)){
+      void replayRecentTo(payload.device);
+      respondSnapshotRequest(payload.device);
+    }
     return;
   }
   if(payload?.type==='need-v1'){
@@ -216,7 +281,7 @@ async function tick(){
       lastResendAt=Date.now();
     }
   }
-  if(!next.length)return;
+  if(!next.length){autoSnapshot();return;}
   publishing=true;
   try{
     await client.publishBatch(next);
@@ -245,7 +310,7 @@ async function connect(){
     resendCursor=0;lastResendAt=Date.now();lastNeedAt=0;asking=false;repairing=false;lastReceiptAt.clear();replayRequests.clear();
     const saved=JSON.parse(localStorage.getItem('vctrmemo-owner-published-'+room)||'[]');
     published=new Set(Array.isArray(saved)?saved:[]);
-    instance.start();client=instance;
+    instance.start();client=instance;connectedAt=Date.now();
     status('暗号化同期に接続しました。ほかの端末も同じURLで開いてください。');
     period=setInterval(tick,1200);
     // A reconnect actively asks the still-online peer to replay recent edits
@@ -261,6 +326,7 @@ $('owner-copy-link').onclick=async()=>{
     status('専用URLをコピーしました。Vectorの自分宛てNotesにだけ貼ってください。');
   }catch{status('コピーできません。ブラウザのアドレスバーから専用URLをコピーしてください。');}
 };
+$('owner-snapshot').onclick=()=>{void publishSnapshot({manual:true});};
 $('owner-disconnect').onclick=()=>{
   if(stopped){
     status('暗号化同期を再接続しています…');
