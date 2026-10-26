@@ -42,7 +42,7 @@ let client=null,period=null,flushing=false,publishing=false,pending=[],published
 let deviceId='',receiptsQueued=new Set(),receiptsSent=new Set(),receiptsByPeer=new Map(),receipting=false;
 let resendCursor=0,lastResendAt=0,lastNeedAt=0,repairing=false,asking=false;
 let composing=false,replayReplying=false;
-let snapshotPublishing=false,connectedAt=0;
+let snapshotPublishing=false,connectedAt=0,lastSnapshotAttemptAt=0;
 const snapshotInbox=new SnapshotInbox(Sync),snapshotRequests=new Map();
 const replayRequests=new Map();
 const snapshotKey=()=> 'vctrmemo-owner-snapshot-'+room;
@@ -56,7 +56,7 @@ async function publishSnapshot({manual=false,requested=false}={}){
     if(manual)status('現在同期できません。再開後にスナップショットを保存してください。');
     return;
   }
-  snapshotPublishing=true;
+  snapshotPublishing=true;lastSnapshotAttemptAt=Date.now();
   const button=$('owner-snapshot');button.disabled=true;
   try{
     const sync=readStorage(localStorage,STORAGE).sync;
@@ -77,7 +77,7 @@ async function publishSnapshot({manual=false,requested=false}={}){
   }finally{snapshotPublishing=false;button.disabled=false;}
 }
 function autoSnapshot(){
-  if(!client||stopped||snapshotPublishing||Date.now()-connectedAt<90000)return;
+  if(!client||stopped||snapshotPublishing||Date.now()-connectedAt<90000||Date.now()-lastSnapshotAttemptAt<5*60*1000)return;
   try{
     const sync=readStorage(localStorage,STORAGE).sync;
     const latest=lastSnapshot();
