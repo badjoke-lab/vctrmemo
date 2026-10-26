@@ -49,7 +49,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
         with:
-          ref: 551544391d12c8c4ef67541c710d72021526d3c3
+          ref: 8b2d5f1c8d454e4f03c0197c4959b5506bc446d8
           path: owner-candidate
           persist-credentials: false
       - name: Check encrypted offline recovery candidate before release
@@ -59,7 +59,7 @@ jobs:
           node --test owner-candidate/owner-sync/tests/snapshot.test.mjs
           python owner-candidate/scripts/build.py
           ./node_modules/.bin/esbuild owner-candidate/owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=owner-candidate/dist/site/owner-sync.js
-          timeout 90s python -u owner-candidate/tests/test-portable-browser.py
+          timeout 55s python -u owner-candidate/tests/test-portable-browser.py
       - name: Browser integration test
         run: |
           python tests/test-browser.py
