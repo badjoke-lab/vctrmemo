@@ -41,18 +41,54 @@
   });
   const validate = (value) => value && value.schema === 1 && Array.isArray(value.pages) && Array.isArray(value.tasks) && value.pages.every(p=>p&&typeof p.id==='string'&&Array.isArray(p.blocks)) && value.tasks.every(t=>t&&typeof t.id==='string');
   let state, engine;
+  let storedRaw=null;
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if(stored?.sync?.version===2 && Array.isArray(stored.sync.ops)) {
-      engine = new VctrSync.Engine(stored.sync.ops, stored.sync.actor, stored.sync.counter);
-      state = engine.project();
-    } else {
-      let older = null;
-      try { older = JSON.parse(localStorage.getItem(V1_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)); }catch{}
-      state = validate(older) ? older : defaults();
-      engine = VctrSync.Engine.fromState(state);
+    storedRaw=localStorage.getItem(STORAGE_KEY);
+    const stored=storedRaw===null?null:JSON.parse(storedRaw);
+    if(storedRaw!==null){
+      if(!stored||stored.sync?.version!==2||!Array.isArray(stored.sync.ops))throw Error('同期履歴の構造が不正です');
+      if(stored.sync.ops.length>12000||!stored.sync.ops.every(VctrSync.isValidOp))throw Error('同期履歴に不正な変更があります');
+      const seenIds=new Map();
+      for(const op of stored.sync.ops){
+        const previous=seenIds.get(op.id);
+        if(previous!==undefined)throw Error(previous===JSON.stringify(op)?'同期履歴に重複があります':'同じIDの変更が衝突しています');
+        seenIds.set(op.id,JSON.stringify(op));
+      }
+      engine=new VctrSync.Engine(stored.sync.ops,stored.sync.actor,stored.sync.counter);
+      if(engine.ops.size!==stored.sync.ops.length)throw Error('同期履歴を完全に読み込めません');
+      state=engine.project();
+    }else{
+      let older=null;
+      try{older=JSON.parse(localStorage.getItem(V1_STORAGE_KEY)??localStorage.getItem(LEGACY_STORAGE_KEY));}catch{}
+      state=validate(older)?older:defaults();
+      engine=VctrSync.Engine.fromState(state);
     }
-  }catch(err){console.error('vctrmemo storage issue',err);state=defaults();engine=VctrSync.Engine.fromState(state);}
+  }catch(err){
+    // Do not let a damaged, oversized or unavailable local history silently
+    // become a fresh workspace. A later persist() would destroy the evidence.
+    console.error('vctrmemo safe-stop: original saved data left untouched',err);
+    const warning=document.createElement('section');
+    warning.id='vctrmemo-recovery-stop';
+    warning.setAttribute('role','alert');
+    warning.style.cssText='margin:24px;padding:20px;max-width:780px;border:2px solid #ba8a57;border-radius:10px;background:#2b211b;color:#fff;font:14px/1.7 system-ui';
+    const heading=document.createElement('h2');heading.textContent='保存データを読み込めません。安全のため編集を停止しました。';
+    const desc=document.createElement('p');desc.textContent='この端末の既存データは上書きしていません。再読み込みやデータ消去を繰り返さず、元データを保存してから復旧してください。詳細: '+String(err.message||err);
+    warning.append(heading,desc);
+    if(storedRaw!==null){
+      const save=document.createElement('button');save.type='button';save.textContent='元の保存データをJSONで書き出す';
+      save.onclick=()=>{
+        const link=document.createElement('a');
+        link.href=URL.createObjectURL(new Blob([storedRaw],{type:'application/json'}));
+        link.download='vctrmemo-raw-recovery-'+new Date().toISOString().slice(0,10)+'.json';
+        document.body.append(link);link.click();
+        setTimeout(()=>{URL.revokeObjectURL(link.href);link.remove();},2000);
+      };
+      warning.append(save);
+    }
+    const app=document.getElementById('app');
+    if(app)app.replaceChildren(warning);else document.body.append(warning);
+    return;
+  }
   let baseline = structuredClone(state);
   let incomingQueue = [];
   // Personal/local is the default. Incoming chat ops are quarantined until opt-in.
