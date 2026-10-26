@@ -67,7 +67,21 @@ with sync_playwright() as p:
         for context in contexts:
             context.add_init_script('window.confirm=()=>true')
             # Offline recovery MUST NOT depend on open network connections.
-            context.route_web_socket('**/*',lambda ws:ws.close())
+            # Replace WebSocket before scripts run. RouteWebSocket.close() from
+            # a synchronous Playwright callback can deadlock the test driver.
+            # This fails connection immediately, with ZERO external traffic.
+            context.add_init_script("""(() => {
+              class OfflineWebSocket {
+                static OPEN=1;
+                constructor(url){this.url=url;this.readyState=3;}
+                addEventListener(name,callback){
+                  if(name==='error')queueMicrotask(()=>callback(new Event('error')));
+                }
+                send(){throw Error('Offline test forbids WebSocket network');}
+                close(){this.readyState=3;}
+              }
+              window.WebSocket=OfflineWebSocket;
+            })()""")
         a,b,c=[context.new_page() for context in contexts]
         print('OFFLINE TEST: create source browser',flush=True)
         storage_a=enter(a)
