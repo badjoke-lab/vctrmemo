@@ -64,7 +64,7 @@ test('malformed history, partial causal chain, cross-record ID collision and lim
  const clone=structuredClone(original);
  clone.ops.push(structuredClone(clone.ops[0]));
  await assert.rejects(()=>sealPortableBackup(clone,secret,Sync),/duplicate/);
- const current=fixture().export();
+ const current=structuredClone(original); // force an actual same-ID collision
  const altered=structuredClone(original);
  altered.ops.at(-1).value='different value';
  assert.throws(()=>preparePortableRestore(current,altered.ops,Sync),/Conflicting operation ID/);
