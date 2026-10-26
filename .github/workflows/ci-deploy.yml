@@ -67,14 +67,19 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
         with:
-          ref: a6431503d392fc2d84eda841101b3c2b737b44c6
+          ref: 2e7d365367137a4391f330e47332b36beff855ba
           path: owner-candidate
           persist-credentials: false
       - name: Build isolated owner-sync release candidate
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
+          # Abort deployment if the proposed candidate cannot safely restore an
+          # encrypted file or if an isolated browser profile loses its notes.
+          node --test owner-candidate/owner-sync/tests/portable-backup.test.mjs
+          node --test owner-candidate/owner-sync/tests/snapshot.test.mjs
           python owner-candidate/scripts/build.py
           ./node_modules/.bin/esbuild owner-candidate/owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=owner-candidate/dist/site/owner-sync.js
+          python owner-candidate/tests/test-portable-browser.py
           mkdir -p dist/site/rc
           rsync -a --exclude='*.xdc' owner-candidate/dist/site/ dist/site/rc/
           python - <<'PY'
