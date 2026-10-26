@@ -63,7 +63,8 @@ async function publishSnapshot({manual=false,requested=false}={}){
     const plan=await snapshotParts(sync,Sync);
     const previous=lastSnapshot();
     if(!manual&&!requested&&previous?.id===plan.id)return;
-    if(requested&&previous?.id===plan.id&&Date.now()-previous.at<60000)return;
+    // A peer requesting recovery may have missed every old relay event.
+    // Re-send the complete snapshot even when its hash has not changed.
     if(manual)status('復旧用の暗号化履歴を '+plan.count+' 分割で保存しています…');
     for(const part of plan.parts){
       if(stopped||!client)throw Error('同期を停止したため中断しました');
@@ -161,7 +162,7 @@ document.addEventListener('compositionstart',()=>{composing=true;},true);
 document.addEventListener('compositionend',()=>{composing=false;setTimeout(flushRemote,0);},true);
 async function announceRejoin(){
   if(!client||stopped)return;
-  try{await client.publish({type:'rejoin-v1',device:deviceId});}
+  try{await client.publish({type:'rejoin-v1',device:deviceId,sentAt:Date.now()});}
   catch(err){console.warn('Owner-sync rejoin request will be retried by relay/history recovery',err);}
 }
 async function replayRecentTo(device){
@@ -233,7 +234,9 @@ function inbound(payload){
   if(payload?.type==='rejoin-v1'){
     if(typeof payload.device==='string'&&/^[a-f0-9-]{36}$/.test(payload.device)){
       void replayRecentTo(payload.device);
-      respondSnapshotRequest(payload.device);
+      // Replay of stale relay history must not trigger full snapshot floods.
+      if(Number.isSafeInteger(payload.sentAt)&&Math.abs(Date.now()-payload.sentAt)<90000)
+        respondSnapshotRequest(payload.device);
     }
     return;
   }
