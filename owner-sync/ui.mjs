@@ -18,6 +18,7 @@ panel.innerHTML=`<details open><summary>本人の端末間同期（ブラウザ�
 <button id="owner-snapshot" type="button">復旧用の暗号化スナップショットを保存</button>
 <div><button id="owner-save-file" type="button">暗号化バックアップをファイル保存</button>
 <button id="owner-load-file" type="button">暗号化バックアップから復元</button>
+<button id="owner-recovery-mode" type="button">安全な復元専用画面を開く</button>
 <input id="owner-backup-file" type="file" accept=".vctrmemo,.json,application/json" hidden></div>
 <p class="owner-warning">暗号化ファイルはリレー不要で復元できますが、<strong>元の秘密鍵付きURLも必要</strong>です。ファイルとURLは別々の安全な場所に保管してください。</p>
 <p id="owner-sync-state" role="status" aria-live="polite">暗号化同期へ接続しています…</p>
@@ -335,6 +336,11 @@ $('owner-copy-link').onclick=async()=>{
   }catch{status('コピーできません。ブラウザのアドレスバーから専用URLをコピーしてください。');}
 };
 $('owner-snapshot').onclick=()=>{void publishSnapshot({manual:true});};
+$('owner-recovery-mode').onclick=()=>{
+  const url=new URL(location.href);
+  url.searchParams.set('recovery','1');
+  window.open(url.href,'_blank','noopener,noreferrer');
+};
 // Local, offline recovery never calls the relay and never changes the
 // currently opened editor. It needs the exact same private #k= URL on a
 // replacement device, without requiring either original device to be online.
