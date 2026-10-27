@@ -147,6 +147,60 @@ with sync_playwright() as p:
         b.wait_for_function("""() => document.querySelector('#owner-sync-state').textContent.includes('復元に失敗')""",timeout=20000)
         assert b.evaluate("localStorage.getItem(window.__vctrmemo_owner_storage_key)")==before
         print('PORTABLE SAFETY: wrong URL secret and tampered file leave existing notes intact PASS',flush=True)
+        # Recovery-only mode is a separate bootstrap path, not a paused
+        # regular editor. It must not load app.js, start sockets or write
+        # localStorage while the operator only chooses/checks a file.
+        fourth=browser.new_context()
+        fourth.add_init_script("""(() => {
+          window.confirm=()=>true;
+          window.__recovery_ws_calls=0;
+          window.WebSocket=class{
+            constructor(){window.__recovery_ws_calls++;throw Error('recovery must not open Nostr');}
+          };
+        })()""")
+        d=fourth.new_page()
+        d.goto(BASE+'?recovery=1#k='+SECRET,wait_until='domcontentloaded',timeout=15000)
+        d.locator('#owner-recovery-file').wait_for(timeout=15000)
+        assert not d.locator('#owner-sync-panel').count(), 'normal sync UI must not load'
+        assert not d.locator('#new-page').count(), 'normal editor must not load'
+        assert d.evaluate("window.__recovery_ws_calls")==0
+        assert d.evaluate("localStorage.getItem(window.__vctrmemo_owner_storage_key)") is None
+        d.locator('#owner-recovery-file').set_input_files({
+            'name':'recovery.vctrmemo','mimeType':'application/json','buffer':encrypted
+        })
+        d.wait_for_function("""() => document.querySelector('#owner-recovery-details')?.textContent.includes('検証成功')""",timeout=12000)
+        assert d.evaluate("localStorage.getItem(window.__vctrmemo_owner_storage_key)") is None, 'file preview must never write'
+        assert d.evaluate("window.__recovery_ws_calls")==0
+        assert d.locator('#owner-recovery-commit').is_enabled()
+        # If another tab wrote after the preview, refuse to overwrite it.
+        d.evaluate("""() => localStorage.setItem(window.__vctrmemo_owner_storage_key,'CHANGED-BY-OTHER-TAB')""")
+        d.locator('#owner-recovery-commit').click()
+        d.wait_for_function("""() => document.querySelector('#owner-recovery-details').textContent.includes('別のタブ')""",timeout=10000)
+        assert d.evaluate("localStorage.getItem(window.__vctrmemo_owner_storage_key)")=='CHANGED-BY-OTHER-TAB'
+        # Simulate a fresh independent destination after an interrupted
+        # restore, then explicitly confirm the validated history.
+        d.evaluate("""() => localStorage.removeItem(window.__vctrmemo_owner_storage_key)""")
+        d.locator('#owner-recovery-file').set_input_files({
+            'name':'recovery.vctrmemo','mimeType':'application/json','buffer':encrypted
+        })
+        d.wait_for_function("""() => document.querySelector('#owner-recovery-details')?.textContent.includes('検証成功')""",timeout=10000)
+        d.locator('#owner-recovery-commit').click()
+        d.wait_for_function("""() => document.querySelector('#owner-recovery-details')?.textContent.includes('オフライン復元完了')""",timeout=10000)
+        recovered=d.evaluate("""() => {
+          const sync=JSON.parse(localStorage.getItem(window.__vctrmemo_owner_storage_key)).sync;
+          return {ids:sync.ops.map(op=>op.id),actor:sync.actor,
+            pages:new VctrSync.Engine(sync.ops,sync.actor,sync.counter).project(),
+            missing:new VctrSync.Engine(sync.ops,sync.actor,sync.counter).missingPredecessors()};
+        }""")
+        assert set(source['ids'])<=set(recovered['ids'])
+        assert recovered['actor']!=source['actor']
+        assert recovered['missing']==[]
+        assert recovered['pages']==source['doc']
+        assert d.evaluate('window.__recovery_ws_calls')==0
+        assert '?recovery=1' not in d.locator('#owner-recovery-back').get_attribute('href')
+        print('RECOVERY-ONLY: no WebSocket/editor/localStorage writes until explicit consent; cross-tab edit rejected; full history restored PASS',flush=True)
+        d.close();fourth.close()
+
     finally:
         browser.close()
         server.shutdown()
