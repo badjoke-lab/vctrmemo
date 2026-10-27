@@ -15,6 +15,7 @@ try{
   let secret=parseHash(location.hash);
   if(location.hash && !secret)throw Error('URLの同期鍵が不正です。データは変更していません。');
   if(!secret){
+    if(new URLSearchParams(location.search).get('recovery')==='1')throw Error('復元には元の秘密鍵付きURLが必要です。勝手に新しい鍵は作成しません。');
     secret=hex(crypto.getRandomValues(new Uint8Array(32)));
     // Fragment is never included in HTTPS requests to GitHub Pages.
     history.replaceState(null,'',location.pathname+location.search+'#k='+secret);
@@ -23,11 +24,15 @@ try{
   const room=hex(digest);
   window.__vctrmemo_owner_storage_key='vctrmemo-synced-v1-'+room;
   window.__vctrmemo_owner_secret=secret; // In-memory only; never saved to localStorage.
-  // Explicitly isolate this opt-in synced workspace from existing vctrmemo-v2 notes.
-  await import('./app.js');
-  // A corrupt local history must not start network synchronization at all.
-  // Keep its raw-data recovery screen visible and leave all local bytes intact.
-  if(!window.__vctrmemo_safe_stopped)await import('../owner-sync.js');
+  // Recovery-only mode reads the existing workspace but does NOT load app.js,
+  // start any Nostr socket, or write localStorage until explicit confirmation.
+  if(new URLSearchParams(location.search).get('recovery')==='1'){
+    await import('./recovery-mode.js');
+  }else{
+    // Explicitly isolate this opt-in synced workspace from legacy notes.
+    await import('./app.js');
+    if(!window.__vctrmemo_safe_stopped)await import('../owner-sync.js');
+  }
   root.remove();
 }catch(error){
   root.textContent='開始できません: '+String(error.message||error);
