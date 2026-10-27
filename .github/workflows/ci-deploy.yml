@@ -65,7 +65,9 @@ jobs:
       - name: Build WebXDC and Pages preview
         run: python scripts/build.py
       - name: Bundle browser-only owner sync module
-        run: ./node_modules/.bin/esbuild owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=dist/site/owner-sync.js
+        run: |
+          ./node_modules/.bin/esbuild owner-sync/ui.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=dist/site/owner-sync.js
+          ./node_modules/.bin/esbuild owner-sync/recovery-mode.mjs --bundle --platform=browser --target=es2022 --format=esm --outfile=dist/site/synced/recovery-mode.js
       - name: Offline two-browser encrypted backup and restore
         run: python tests/test-portable-browser.py
       - name: Verify owner sync stays out of WebXDC
