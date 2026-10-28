@@ -26,6 +26,17 @@ details.setAttribute('role','status');
 details.setAttribute('aria-live','polite');
 details.textContent='未選択：この端末の保存データは変更されていません。';
 details.style.cssText='white-space:pre-wrap;margin:16px 0;padding:12px;background:#23382f;border-radius:8px';
+// Optional local-only content preview. Never write titles or body text to
+// URLs, relay events, logs or telemetry. textContent prevents HTML injection.
+const preview=document.createElement('details');
+preview.id='owner-recovery-preview';
+preview.hidden=true;
+const previewHeading=document.createElement('summary');
+previewHeading.textContent='復元されるページ・文章の内容を確認する（この端末だけに表示）';
+const previewBody=document.createElement('div');
+previewBody.id='owner-recovery-preview-body';
+previewBody.style.cssText='margin-top:12px;padding:12px;background:#23382f;border-radius:8px';
+preview.append(previewHeading,previewBody);
 const commit=document.createElement('button');
 commit.id='owner-recovery-commit';commit.type='button';commit.disabled=true;
 commit.textContent='検証済みの履歴をこの端末に復元する';
@@ -36,11 +47,46 @@ const normal=new URL(location.href);
 normal.searchParams.delete('recovery');
 back.href=normal.href;
 back.style.cssText='display:block;color:#bfe8d8;margin-top:18px';
-page.append(title,explain,warning,input,details,commit,back);
+page.append(title,explain,warning,input,details,preview,commit,back);
 document.body.replaceChildren(page);
 
 let pending=null;
 function status(message){details.textContent=message;}
+function renderPreview(project){
+  previewBody.replaceChildren();
+  const active=project.pages.filter(p=>!p.deleted);
+  for(const page of active.slice(0,25)){
+    const section=document.createElement('section');
+    const heading=document.createElement('h3');
+    heading.textContent=String(page.title||'無題');
+    heading.style.cssText='font-size:15px;margin:12px 0 4px';
+    section.append(heading);
+    const excerpts=(page.blocks||[]).filter(b=>!b.deleted&&typeof b.text==='string'&&b.text.trim()).slice(0,3);
+    for(const b of excerpts){
+      const p=document.createElement('p');
+      p.textContent=b.text.slice(0,180)+(b.text.length>180?'…':'');
+      p.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0 7px;color:#d0e3d8';
+      section.append(p);
+    }
+    previewBody.append(section);
+  }
+  if(active.length>25){
+    const more=document.createElement('p');
+    more.textContent='ほかに'+(active.length-25)+'ページあります。';
+    previewBody.append(more);
+  }
+  const tasks=(project.tasks||[]).filter(t=>!t.deleted);
+  if(tasks.length){
+    const label=document.createElement('h3');label.textContent='タスク（最大10件）';previewBody.append(label);
+    for(const task of tasks.slice(0,10)){
+      const p=document.createElement('p');
+      p.textContent=String(task.title||'無題');
+      previewBody.append(p);
+    }
+  }
+  preview.hidden=false;
+  preview.open=false;
+}
 function validSaved(raw){
   if(raw===null)return new Sync.Engine();
   let existing;
@@ -56,6 +102,7 @@ function validSaved(raw){
 }
 input.addEventListener('change',async()=>{
   pending=null;commit.disabled=true;
+  preview.hidden=true;preview.open=false;previewBody.replaceChildren();
   const file=input.files?.[0];
   if(!file){status('ファイルは選択されていません。');return;}
   try{
@@ -68,6 +115,7 @@ input.addEventListener('change',async()=>{
     if(engine.merge(plan.changes)!==plan.changes.length||engine.missingPredecessors().length)
       throw Error('全編集履歴を復元できません。');
     const project=engine.project();
+    renderPreview(project);
     const existingCount=before===null?0:JSON.parse(before).sync.ops.length;
     pending={before,encoded:JSON.stringify({sync:engine.export()}),changes:plan.changes.length};
     status('検証成功：暗号化・改ざん検査・履歴整合性が正常です。\n'
@@ -85,6 +133,7 @@ input.addEventListener('change',async()=>{
     }
   }catch(err){
     pending=null;commit.disabled=true;
+    preview.hidden=true;previewBody.replaceChildren();
     status('復元前検査で中止しました：'+String(err.message||err)+'\n既存データは変更していません。');
   }
 });
