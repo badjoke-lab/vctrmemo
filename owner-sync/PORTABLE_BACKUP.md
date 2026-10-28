@@ -17,7 +17,7 @@ The encrypted file contains the **complete causal operation history** (pages, bl
 1. On the replacement device, open the **exact same private URL** (same `#k=`).
 2. Open the sync panel. **You do not need to connect to Nostr**, and you may press **同期を停止** while restoring.
 3. Click **暗号化バックアップから復元** and choose the stored `.vctrmemo` file.
-4. The app checks AES-256-GCM authentication, the SHA-256 plaintext digest, every operation ID and causal predecessor. It previews the operation count and asks for confirmation.
+4. The app checks AES-256-GCM authentication, the SHA-256 plaintext digest, every operation ID and causal predecessor. In **安全な復元専用画面** you can expand **復元されるページ・文章の内容を確認する** to inspect page titles and short excerpts locally **without writing or connecting to Nostr**. The preview starts collapsed to avoid unnecessarily exposing private text on screen. It then shows operation, page, task, and conflict counts and requires explicit confirmation before restoration.
 5. All new operations are applied through the existing editor's single writer. Existing notes are merged rather than replaced; the old actor identity is not copied. On repeat import, already-present operations are ignored.
 6. After confirming the pages, you can resume network sync if desired.
 
