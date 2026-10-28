@@ -169,6 +169,12 @@ with sync_playwright() as p:
             'name':'recovery.vctrmemo','mimeType':'application/json','buffer':encrypted
         })
         d.wait_for_function("""() => document.querySelector('#owner-recovery-details')?.textContent.includes('検証成功')""",timeout=12000)
+        assert d.locator('#owner-recovery-preview').is_visible(), 'verified content preview should be available'
+        assert not d.locator('#owner-recovery-preview').get_attribute('open'), 'private content preview should default collapsed'
+        d.locator('#owner-recovery-preview summary').click()
+        content=d.locator('#owner-recovery-preview-body').inner_text()
+        assert 'オフラインから復元するページ' in content, 'missing restored page title preview'
+        assert 'Macで編集した一行目' in content and '二行目にも大事な情報' in content, 'missing multiline body preview'
         assert d.evaluate("localStorage.getItem(window.__vctrmemo_owner_storage_key)") is None, 'file preview must never write'
         assert d.evaluate("window.__recovery_ws_calls")==0
         assert d.locator('#owner-recovery-commit').is_enabled()
