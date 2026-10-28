@@ -49,7 +49,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
         with:
-          ref: d4292382ae808f2330aed367812a268738a94de1
+          ref: adfeedd17bdad919cccc15a135afc633ee89064f
           path: owner-candidate
           persist-credentials: false
       - name: Check encrypted offline recovery candidate before release
