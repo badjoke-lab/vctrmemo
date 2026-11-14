@@ -23,6 +23,7 @@ jobs:
         run: |
           node --check vector-live/probe-core.mjs
           node --check vector-live/probe-ui.mjs
+          node --check vector-live/v051-probe-ui.mjs
       - name: Audit real Vector same-npub peer-discovery and history constraints
         run: node vector-live/tests/audit-vector-owner.mjs > vector-host-owner-audit.json
       - name: Print read-only host audit
@@ -49,11 +50,36 @@ jobs:
               assert 'transfer.js' not in z.namelist()
           print('isolated Vector realtime diagnostic archive (no personal memo code) PASS')
           PY
+      - name: Build Vector v0.5.1 diagnostic and validate privacy boundary
+        run: |
+          python scripts/build-vector-v051-probe.py
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          package=Path('dist/probes/vctrmemo-vector-v051-diagnostic.xdc')
+          with ZipFile(package) as z:
+              assert z.testzip() is None
+              assert set(z.namelist())=={'index.html','manifest.toml','vector-live/probe-core.mjs','vector-live/v051-probe-ui.mjs'}
+              assert b'src="webxdc.js"' in z.read('index.html')
+              code=z.read('vector-live/v051-probe-ui.mjs')
+              assert b'joinRealtimeChannel' in z.read('vector-live/probe-core.mjs')
+              for name in z.namelist():
+                  assert not name.startswith('owner-sync/')
+                  assert not name.startswith('app.js')
+              assert b'localStorage' not in code and b'indexedDB' not in code
+          print('Vector v0.5.1 synthetic-only diagnostic package PASS')
+          PY
       - name: Upload pinned source audit evidence
         uses: actions/upload-artifact@v4
         with:
           name: vector-owner-host-audit
           path: vector-host-owner-audit.json
+          retention-days: 14
+      - name: Upload Vector v0.5.1 diagnostic XDC
+        uses: actions/upload-artifact@v4
+        with:
+          name: vctrmemo-vector-v051-diagnostic-xdc
+          path: dist/probes/vctrmemo-vector-v051-diagnostic.xdc
           retention-days: 14
       - name: Upload Vector diagnostic XDC
         uses: actions/upload-artifact@v4
