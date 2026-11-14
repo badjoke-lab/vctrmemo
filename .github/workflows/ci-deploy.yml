@@ -49,7 +49,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/checkout@v4
         with:
-          ref: adfeedd17bdad919cccc15a135afc633ee89064f
+          ref: aff7c27996d372124d4c450509b10b364ce483c5
           path: owner-candidate
           persist-credentials: false
       - name: Check encrypted offline recovery candidate before release
@@ -130,6 +130,36 @@ jobs:
               assert b'joinRealtimeChannel' in archive.read('vector-live/probe-core.mjs')
           print('URL-launchable Vector diagnostic archive verified:',published)
           PY
+      - name: Verify and publish Vector v0.5.1 dedicated diagnostic Mini App
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          node --check owner-candidate/vector-live/v051-probe-ui.mjs
+          node owner-candidate/vector-live/tests/probe.test.mjs
+          node owner-candidate/vector-live/tests/audit-vector-owner.mjs > vector-v051-host-audit.json
+          python owner-candidate/scripts/build-vector-v051-probe.py
+          cp owner-candidate/dist/probes/vctrmemo-vector-v051-diagnostic.xdc dist/site/vctrmemo-vector-v051-diagnostic.xdc
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          archived=Path('dist/site/vctrmemo-vector-v051-diagnostic.xdc')
+          original=Path('owner-candidate/dist/probes/vctrmemo-vector-v051-diagnostic.xdc')
+          assert archived.is_file() and archived.read_bytes()==original.read_bytes()
+          with ZipFile(archived) as z:
+              assert z.testzip() is None
+              assert set(z.namelist())=={'index.html','manifest.toml','vector-live/probe-core.mjs','vector-live/v051-probe-ui.mjs'}
+              assert b'joinRealtimeChannel' in z.read('vector-live/probe-core.mjs')
+              assert b'webxdc.js' in z.read('index.html')
+              assert b'localStorage' not in z.read('vector-live/v051-probe-ui.mjs')
+              assert b'indexedDB' not in z.read('vector-live/v051-probe-ui.mjs')
+          print('v0.5.1 diagnostic only; original vctrmemo.xdc and synced notes untouched PASS')
+          PY
+      - name: Upload Vector v0.5.1 test-only XDC
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vctrmemo-vector-v051-diagnostic-xdc
+          path: dist/site/vctrmemo-vector-v051-diagnostic.xdc
+          retention-days: 14
       - name: Upload test-only URL-launchable XDC
         uses: actions/upload-artifact@v4
         with:
